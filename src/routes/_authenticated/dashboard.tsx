@@ -96,10 +96,10 @@ function LinkAccount({ onDone }: { onDone: () => void }) {
       error: "Connection dropped. Please try again.",
     }));
     setBusy(false);
-    if (r.ok) {
-      toast.success(`Linked! Found ${r.total} grade entries.`);
-      onDone();
-    } else toast.error(r.error);
+    if (!r.ok) toast.error(r.error);
+    else if (r.total === 0) toast.warning("Connected to GUC, but no grade rows were found. Check the portal or try again after grades are published.");
+    else toast.success(`Linked! Found ${r.total} grade entries.`);
+    onDone();
   }
 
   return (
@@ -184,7 +184,7 @@ function Grades({ data, onChange }: { data: Data; onChange: () => void }) {
         </div>
       </div>
       {byCourse.length === 0 ? (
-        <p className="mt-8 ledger-card p-6 text-muted-foreground">No grades published on the portal yet.</p>
+        <p className="mt-8 ledger-card p-6 text-muted-foreground">GUC returned no grade rows. Check the portal for published grades; if grades are visible there, the portal table format may need an update.</p>
       ) : (
         <div className="mt-8 grid gap-6 md:grid-cols-2">
           {byCourse.map(([course, items]) => (
