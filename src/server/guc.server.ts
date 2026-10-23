@@ -180,7 +180,23 @@ export function parseGrades(html: string): GradeRow[] {
 export async function fetchGrades(username: string, password: string): Promise<GradeRow[]> {
   const all: GradeRow[] = [];
   for (const p of GRADE_PATHS) {
-    all.push(...parseGrades(await ntlmGet(p, username, password)));
+    const html = await ntlmGet(p, username, password);
+    const parsed = parseGrades(html);
+    all.push(...parsed);
+    if (parsed.length === 0) {
+      // Return only structural counts/booleans; never include portal content or personal data.
+      const tableCount = [...html.matchAll(/<table\\b/gi)].length;
+      const rowCount = [...html.matchAll(/<tr\\b/gi)].length;
+      const hasQuizHeader = /quiz\\s*\\/?\\s*assignment/i.test(html);
+      const hasElementHeader = /element\\s+name/i.test(html);
+      const hasGradeHeader = /grade/i.test(html);
+      const hasSelectedCourse = [...html.matchAll(/<option\\b([^>]*)>/gi)]
+        .some((match) => /\\bselected(?:\\s|=|>)/i.test(match[1] ?? ""));
+      throw new GucError(
+        `GUC page loaded, but no grade rows were parsed (tables: ${tableCount}, rows: ${rowCount}, quiz header: ${hasQuizHeader}, element header: ${hasElementHeader}, grade header: ${hasGradeHeader}, course selected: ${hasSelectedCourse}).`,
+        "unexpected",
+      );
+    }
   }
   return all;
 }
