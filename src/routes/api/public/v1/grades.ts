@@ -12,14 +12,18 @@ export const Route = createFileRoute("/api/public/v1/grades")({
       OPTIONS: async () => new Response(null, { status: 204, headers: cors }),
       GET: async ({ request }) => {
         const authorization = (request.headers.get("authorization") ?? "").trim();
-        const bearer = /^Bearer\s+(.+)$/i.exec(authorization)?.[1]?.trim();
         const candidates = [
-          bearer,
-          request.headers.get("x-api-key")?.trim(),
-          request.headers.get("apikey")?.trim(),
           authorization,
-        ];
-        const apiKey = candidates.find((candidate) => candidate && /^guc_[a-f0-9]{48}$/i.test(candidate));
+          request.headers.get("x-api-key") ?? "",
+          request.headers.get("apikey") ?? "",
+        ].map((candidate) =>
+          candidate
+            .trim()
+            .replace(/^(?:Bearer\s*:?\s*)+/i, "")
+            .replace(/^["']|["']$/g, "")
+            .trim(),
+        );
+        const apiKey = candidates.find((candidate) => /^guc_[a-f0-9]{48}$/i.test(candidate));
         if (!apiKey) {
           return Response.json(
             { error: "Missing or malformed API key. Send the full key as Authorization: Bearer <key> or x-api-key." },
