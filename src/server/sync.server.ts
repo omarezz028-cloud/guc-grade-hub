@@ -12,7 +12,20 @@ export type GradeChange = GradeRow & { previous: string | null };
 async function applyGrades(userId: string, rows: GradeRow[], notify: boolean) {
   const db = await admin();
   const { data: existing } = await db.from("grades").select("course,item,grade").eq("user_id", userId);
-  const prev = new Map((existing ?? []).map((g) => [`${g.course}|${g.item}`, g.grade]));
+  const badHeaderRow = (existing ?? []).some(
+    (g) => g.course === "General" && g.item === "Course" && g.grade === "Percentage",
+  );
+  if (badHeaderRow) {
+    const { error } = await db
+      .from("grades")
+      .delete()
+      .eq("user_id", userId)
+      .eq("course", "General")
+      .eq("item", "Course")
+      .eq("grade", "Percentage");
+    if (error) throw new Error(error.message);
+  }
+  const prev = new Map((existing ?? []).map((g) => [g.course + "|" + g.item, g.grade]));
   const changes: GradeChange[] = [];
   const upserts = [];
   for (const r of rows) {
