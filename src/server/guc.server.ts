@@ -40,7 +40,7 @@ function mergeCookies(...headers: string[][]): string {
   return [...cookies].map(([name, value]) => name + "=" + value).join("; ");
 }
 
-function coursePostback(html: string, currentPath: string): { path: string; body: string } | null {
+function coursePostback(html: string, currentPath: string): { path: string; body: string; selectName: string; options: { value: string; label: string }[] } | null {
   const form = /<form\b([^>]*)>([\s\S]*?)<\/form>/i.exec(html);
   if (!form) return null;
   const formAttrs = form[1] ?? "";
@@ -87,12 +87,39 @@ function coursePostback(html: string, currentPath: string): { path: string; body
   fields.set(selectName, selectedValue);
   fields.set("__EVENTTARGET", attr(selectAttrs, "name") ?? attr(selectAttrs, "id") ?? "");
   fields.set("__EVENTARGUMENT", "");
-  return { path: action.pathname + action.search, body: fields.toString() };
+  const courseOptions = options.map((match) => ({
+    value: attr(match[1] ?? "", "value") ?? decode(match[2] ?? ""),
+    label: decode(match[2] ?? ""),
+  })).filter((option) => option.value.trim() && !/^(choose|select)\b/i.test(option.label.trim()));
+  return {
+    path: action.pathname + action.search,
+    body: fields.toString(),
+    selectName,
+    options: courseOptions,
+  };
 }
 
-async function ntlmGet(path: string, rawUser: string, password: string): Promise<string> {
+async function ntlmGet(path: string, rawUser: string, password: string): Promise<GradeRow[]> {
   const { user, domain } = splitUser(rawUser);
   const conn = new KeepAliveConnection(new URL(BASE).host);
+  let tokenFollowed = false;
+  const diagnose = (html: string, detail: string) => {
+    const tableCount = [...html.matchAll(/<table\b/gi)].length;
+    const rowCount = [...html.matchAll(/<tr\b/gi)].length;
+    const hasQuizHeader = /quiz\s*\/?\s*assignment/i.test(html);
+    const hasElementHeader = /element\s+name/i.test(html);
+    const hasGradeHeader = /grade/i.test(html);
+    const hasSelectedCourse = [...html.matchAll(/<option\b([^>]*)>/gi)
+      .some((match) => /\bselected(?:\s|=|>)/i.test(match[1] ?? ""));
+    return "GUC page loaded but grades could not be read (" + detail +
+      "; token redirect followed: " + tokenFollowed +
+      "; tables: " + tableCount +
+      ", rows: " + rowCount +
+      ", quiz header: " + hasQuizHeader +
+      ", element header: " + hasElementHeader +
+      ", grade header: " + hasGradeHeader +
+      ", course selected: " + hasSelectedCourse + ").";
+  };
   try {
     let r1;
     try {
@@ -127,6 +154,7 @@ async function ntlmGet(path: string, rawUser: string, password: string): Promise
     // GUC first serves a JavaScript bounce to the same page with a v= token.
     const token = /sTo\('([^']+)'\)/.exec(pageBody)?.[1];
     if (token) {
+      tokenFollowed = true;
       const target = new URL(pagePath, BASE);
       target.searchParams.set("v", token);
       pagePath = target.pathname + target.search;
@@ -144,19 +172,47 @@ async function ntlmGet(path: string, rawUser: string, password: string): Promise
     }
 
     const postback = coursePostback(pageBody, pagePath);
-    if (!postback) return pageBody;
-    const r3 = await conn.request("POST", postback.path, {
-      "Content-Type": "application/x-www-form-urlencoded",
-      Referer: BASE + pagePath,
-      ...(cookies ? { Cookie: cookies } : {}),
-    }, postback.body);
-    if (r3.status === 401) {
-      throw new GucError("GUC rejected the course-selection postback (HTTP 401). Please unlink and relink your GUC account if this continues.", "unexpected");
+    if (!postback) {
+      const rows = parseGrades(pageBody);
+      if (rows.length) return rows;
+      throw new GucError(diagnose(pageBody, "no course dropdown form found"), "unexpected");
     }
-    if (r3.status < 200 || r3.status >= 300) {
-      throw new GucError("GUC portal returned status " + r3.status + ".", "unexpected");
+    if (postback.options.length === 0) {
+      const rows = parseGrades(pageBody);
+      if (rows.length) return rows;
+      throw new GucError(diagnose(pageBody, "course dropdown had no usable options"), "unexpected");
     }
-    return r3.body;
+
+    const allRows: GradeRow[] = [];
+    let lastBody = pageBody;
+    let attempted = 0;
+    for (const option of postback.options.slice(0, 80)) {
+      const fields = new URLSearchParams(postback.body);
+      fields.set(postback.selectName, option.value);
+      fields.set("__EVENTTARGET", postback.selectName);
+      fields.set("__EVENTARGUMENT", "");
+      const response = await conn.request("POST", postback.path, {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Referer: BASE + pagePath,
+        ...(cookies ? { Cookie: cookies } : {}),
+      }, fields.toString());
+      attempted++;
+      if (response.status === 401) {
+        throw new GucError("GUC rejected the course-selection postback (HTTP 401).", "unexpected");
+      }
+      if (response.status < 200 || response.status >= 300) {
+        if (response.status === 500) continue;
+        throw new GucError("GUC course selection returned status " + response.status + ".", "unexpected");
+      }
+      lastBody = response.body;
+      allRows.push(...parseGrades(response.body, option.label));
+    }
+    if (allRows.length) {
+      const unique = new Map<string, GradeRow>();
+      for (const row of allRows) unique.set(row.course + "|" + row.item, row);
+      return [...unique.values()];
+    }
+    throw new GucError(diagnose(lastBody, "course postbacks attempted: " + attempted), "unexpected");
   } finally {
     conn.close();
   }
@@ -175,7 +231,7 @@ const decode = (s: string) =>
     .trim();
 
 /** Parse grade tables, using their column headers when the portal provides them. */
-export function parseGrades(html: string): GradeRow[] {
+export function parseGrades(html: string, courseOverride?: string): GradeRow[] {
   const tables = [...html.matchAll(/<table\b((?:(?!<table\b)[\s\S])*?)<\/table>/gi)].map((m) => m[1] ?? "");
   const preferred = tables.filter((t) => /id="[^"]*(midDg|grade|Dg)[^"]*"/i.test(t.split(">")[0] ?? ""));
   const chosen = preferred.length ? preferred : tables;
@@ -257,7 +313,7 @@ export function parseGrades(html: string): GradeRow[] {
       let item = "";
       let grade = "";
       if (isQuizAssignmentTable) {
-        course = selectedCourse || course;
+        course = courseOverride || selectedCourse || course;
         item = [cells[quizColumn], cells[elementColumn]].filter(Boolean).join(" – ");
         grade = cells[gradeColumn] ?? "";
       } else if (courseColumn >= 0 && gradeColumn >= 0) {
@@ -285,23 +341,7 @@ export function parseGrades(html: string): GradeRow[] {
 export async function fetchGrades(username: string, password: string): Promise<GradeRow[]> {
   const all: GradeRow[] = [];
   for (const p of GRADE_PATHS) {
-    const html = await ntlmGet(p, username, password);
-    const parsed = parseGrades(html);
-    all.push(...parsed);
-    if (parsed.length === 0) {
-      // Return only structural counts/booleans; never include portal content or personal data.
-      const tableCount = [...html.matchAll(/<table\b/gi)].length;
-      const rowCount = [...html.matchAll(/<tr\b/gi)].length;
-      const hasQuizHeader = /quiz\s*\/?\s*assignment/i.test(html);
-      const hasElementHeader = /element\s+name/i.test(html);
-      const hasGradeHeader = /grade/i.test(html);
-      const hasSelectedCourse = [...html.matchAll(/<option\b([^>]*)>/gi)]
-        .some((match) => /\bselected(?:\s|=|>)/i.test(match[1] ?? ""));
-      throw new GucError(
-        `GUC page loaded, but no grade rows were parsed (tables: ${tableCount}, rows: ${rowCount}, quiz header: ${hasQuizHeader}, element header: ${hasElementHeader}, grade header: ${hasGradeHeader}, course selected: ${hasSelectedCourse}).`,
-        "unexpected",
-      );
-    }
+    all.push(...await ntlmGet(p, username, password));
   }
   return all;
 }
