@@ -271,7 +271,7 @@ export function parseGrades(html: string, courseOverride?: string): GradeRow[] {
       const item = [row.cells[quizColumn], row.cells[elementColumn]].filter(Boolean).join(" – ");
       const grade = row.cells[gradeColumn] ?? "";
       if (!item || !grade) continue;
-      const course = selectedCourse || "General";
+      const course = courseOverride || selectedCourse || "General";
       const key = course + "|" + item;
       const count = seen.get(key) ?? 0;
       seen.set(key, count + 1);
