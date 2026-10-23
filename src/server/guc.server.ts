@@ -112,13 +112,12 @@ async function ntlmGet(path: string, rawUser: string, password: string): Promise
     if (!postback) return r2.body;
     const cookies = mergeCookies(r1.headers["set-cookie"] ?? [], r2.headers["set-cookie"] ?? []);
     const r3 = await conn.request("POST", postback.path, {
-      Authorization: "NTLM " + ntlmType3(challenge[1]!, user, password, domain),
       "Content-Type": "application/x-www-form-urlencoded",
       Referer: BASE + path,
       ...(cookies ? { Cookie: cookies } : {}),
     }, postback.body);
     if (r3.status === 401) {
-      throw new GucError("GUC rejected the username or password.", "bad_credentials");
+      throw new GucError("GUC rejected the course-selection postback (HTTP 401). Please unlink and relink your GUC account if this continues.", "unexpected");
     }
     if (r3.status < 200 || r3.status >= 300) {
       throw new GucError("GUC portal returned status " + r3.status + ".", "unexpected");
