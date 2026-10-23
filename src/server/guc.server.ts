@@ -109,7 +109,7 @@ async function ntlmGet(path: string, rawUser: string, password: string): Promise
     const hasQuizHeader = /quiz\s*\/?\s*assignment/i.test(html);
     const hasElementHeader = /element\s+name/i.test(html);
     const hasGradeHeader = /grade/i.test(html);
-    const hasSelectedCourse = [...html.matchAll(/<option\b([^>]*)>/gi)
+    const hasSelectedCourse = [...html.matchAll(/<option\b([^>]*)>/gi)]
       .some((match) => /\bselected(?:\s|=|>)/i.test(match[1] ?? ""));
     return "GUC page loaded but grades could not be read (" + detail +
       "; token redirect followed: " + tokenFollowed +
