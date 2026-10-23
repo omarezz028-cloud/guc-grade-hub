@@ -80,7 +80,13 @@ export function parseGrades(html: string): GradeRow[] {
   const courseLabels = new Set(["course", "course code", "course name", "subject", "subject code"]);
   const itemLabels = new Set(["item", "assessment", "component", "exam", "exam type", "grade item"]);
   const gradeLabels = new Set(["grade", "percentage", "percent", "mark", "marks", "score", "result", "obtained"]);
-  const knownLabels = new Set([...courseLabels, ...itemLabels, ...gradeLabels, "date", "type"]);
+  const quizLabels = new Set(["quiz assignment"]);
+  const elementLabels = new Set(["element name"]);
+  const knownLabels = new Set([...courseLabels, ...itemLabels, ...gradeLabels, ...quizLabels, ...elementLabels, "prof lecturer ta", "date", "type"]);
+  const selectedCourse = decode(
+    [...html.matchAll(/<option\\b([^>]*)>([\\s\\S]*?)<\\/option>/gi)]
+      .find((match) => /\\bselected(?:\\s|=|>)/i.test(match[1] ?? ""))?.[2] ?? "",
+  );
 
   for (const table of chosen) {
     const parsed = [...table.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)].map((match) => ({
@@ -96,6 +102,9 @@ export function parseGrades(html: string): GradeRow[] {
     const courseColumn = header.findIndex((label) => courseLabels.has(label));
     const itemColumn = header.findIndex((label) => itemLabels.has(label));
     const gradeColumn = header.findIndex((label) => gradeLabels.has(label));
+    const quizColumn = header.findIndex((label) => quizLabels.has(label));
+    const elementColumn = header.findIndex((label) => elementLabels.has(label));
+    const isQuizAssignmentTable = quizColumn >= 0 && elementColumn >= 0 && gradeColumn >= 0;
 
     for (let rowIndex = 0; rowIndex < parsed.length; rowIndex++) {
       if (rowIndex === headerIndex) continue;
@@ -111,7 +120,11 @@ export function parseGrades(html: string): GradeRow[] {
       let course = "General";
       let item = "";
       let grade = "";
-      if (courseColumn >= 0 && gradeColumn >= 0) {
+      if (isQuizAssignmentTable) {
+        course = selectedCourse || course;
+        item = [cells[quizColumn], cells[elementColumn]].filter(Boolean).join(" – ");
+        grade = cells[gradeColumn] ?? "";
+      } else if (courseColumn >= 0 && gradeColumn >= 0) {
         course = cells[courseColumn] || course;
         item = itemColumn >= 0 ? cells[itemColumn] : header[gradeColumn] || "Grade";
         grade = cells[gradeColumn] ?? "";
