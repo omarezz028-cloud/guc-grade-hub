@@ -88,6 +88,37 @@ export function parseGrades(html: string): GradeRow[] {
       .find((match) => /\bselected(?:\s|=|>)/i.test(match[1] ?? ""))?.[2] ?? "",
   );
 
+  // ASP.NET can nest layout tables around its GridView. Parse the grade rows
+  // from the document as a fallback so the nested table boundary cannot hide them.
+  const documentRows = [...html.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)].map((match) => ({
+    html: match[0],
+    cells: [...match[0].matchAll(/<(td|th)\b[\s\S]*?<\/\1>/gi)].map((cell) => decode(cell[0])),
+  })).filter((row) => row.cells.length > 0);
+  const quizHeaderIndex = documentRows.findIndex(({ cells }) => {
+    const labels = cells.map(normalize);
+    return labels.includes("quiz assignment") && labels.includes("element name") && labels.includes("grade");
+  });
+  if (quizHeaderIndex >= 0) {
+    const header = documentRows[quizHeaderIndex]!.cells.map(normalize);
+    const quizColumn = header.indexOf("quiz assignment");
+    const elementColumn = header.indexOf("element name");
+    const gradeColumn = header.indexOf("grade");
+    for (const row of documentRows.slice(quizHeaderIndex + 1)) {
+      const labels = row.cells.map(normalize);
+      if (labels.includes("quiz assignment") && labels.includes("element name") && labels.includes("grade")) break;
+      if (row.cells.length <= Math.max(quizColumn, elementColumn, gradeColumn)) continue;
+      const item = [row.cells[quizColumn], row.cells[elementColumn]].filter(Boolean).join(" – ");
+      const grade = row.cells[gradeColumn] ?? "";
+      if (!item || !grade) continue;
+      const course = selectedCourse || "General";
+      const key = course + "|" + item;
+      const count = seen.get(key) ?? 0;
+      seen.set(key, count + 1);
+      rows.push({ course, item: count ? item + " (" + (count + 1) + ")" : item, grade });
+    }
+    if (rows.length) return rows;
+  }
+
   for (const table of chosen) {
     const parsed = [...table.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)].map((match) => ({
       html: match[0],
