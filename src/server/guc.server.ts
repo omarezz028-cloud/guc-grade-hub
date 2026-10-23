@@ -23,13 +23,68 @@ function splitUser(raw: string): { user: string; domain: string } {
   return i > -1 ? { domain: t.slice(0, i), user: t.slice(i + 1) } : { domain: "", user: t };
 }
 
+function attr(attrs: string, name: string): string | null {
+  const match = new RegExp("\\b" + name + "\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))", "i").exec(attrs);
+  return match?.[1] ?? match?.[2] ?? match?.[3] ?? null;
+}
+
+function mergeCookies(...headers: string[][]): string {
+  const cookies = new Map<string, string>();
+  for (const values of headers) {
+    for (const value of values) {
+      const pair = value.split(";", 1)[0] ?? "";
+      const separator = pair.indexOf("=");
+      if (separator > 0) cookies.set(pair.slice(0, separator).trim(), pair.slice(separator + 1).trim());
+    }
+  }
+  return [...cookies].map(([name, value]) => name + "=" + value).join("; ");
+}
+
+function coursePostback(html: string, currentPath: string): { path: string; body: string } | null {
+  const form = /<form\b([^>]*)>([\s\S]*?)<\/form>/i.exec(html);
+  if (!form) return null;
+  const formAttrs = form[1] ?? "";
+  const formBody = form[2] ?? "";
+  const selects = [...formBody.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/gi)];
+  const select = selects.find((match) => /course|class|subject|semester/i.test(attr(match[1] ?? "", "name") ?? attr(match[1] ?? "", "id") ?? "")) ?? selects[0];
+  if (!select) return null;
+  const selectAttrs = select[1] ?? "";
+  const selectName = attr(selectAttrs, "name");
+  if (!selectName) return null;
+  const options = [...(select[2] ?? "").matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/gi)];
+  const option = options.find((match) => attr(match[1] ?? "", "selected") !== null) ?? options[0];
+  if (!option) return null;
+  const selectedValue = attr(option[1] ?? "", "value") ?? decode(option[2] ?? "");
+  const formAction = attr(formAttrs, "action") ?? currentPath;
+  let action: URL;
+  try {
+    action = new URL(formAction, BASE + currentPath);
+  } catch {
+    return null;
+  }
+  if (action.origin !== BASE) return null;
+
+  const fields = new URLSearchParams();
+  for (const input of formBody.matchAll(/<input\b([^>]*)>/gi)) {
+    const attrs = input[1] ?? "";
+    const name = attr(attrs, "name");
+    if (!name) continue;
+    const type = (attr(attrs, "type") ?? "text").toLowerCase();
+    if (type === "hidden") fields.append(name, decode(attr(attrs, "value") ?? ""));
+  }
+  fields.set(selectName, selectedValue);
+  fields.set("__EVENTTARGET", attr(selectAttrs, "name") ?? attr(selectAttrs, "id") ?? "");
+  fields.set("__EVENTARGUMENT", "");
+  return { path: action.pathname + action.search, body: fields.toString() };
+}
+
 async function ntlmGet(path: string, rawUser: string, password: string): Promise<string> {
   const { user, domain } = splitUser(rawUser);
   const conn = new KeepAliveConnection(new URL(BASE).host);
   try {
     let r1;
     try {
-      r1 = await conn.request("GET", path, { Authorization: `NTLM ${ntlmType1()}` });
+      r1 = await conn.request("GET", path, { Authorization: "NTLM " + ntlmType1() });
     } catch {
       throw new GucError("Could not reach the GUC portal.", "unreachable");
     }
@@ -37,25 +92,42 @@ async function ntlmGet(path: string, rawUser: string, password: string): Promise
     const challenge = /NTLM\s+([A-Za-z0-9+/=]{20,})/.exec(auth);
     if (!challenge) {
       throw new GucError(
-        `GUC portal did not start a login handshake (status ${r1.status}).`,
+        "GUC portal did not start a login handshake (status " + r1.status + ").",
         "unexpected",
       );
     }
+    const cookie1 = mergeCookies(r1.headers["set-cookie"] ?? []);
     const r2 = await conn.request("GET", path, {
-      Authorization: `NTLM ${ntlmType3(challenge[1]!, user, password, domain)}`,
+      Authorization: "NTLM " + ntlmType3(challenge[1]!, user, password, domain),
+      ...(cookie1 ? { Cookie: cookie1 } : {}),
     });
     if (r2.status === 401) {
       throw new GucError("GUC rejected the username or password.", "bad_credentials");
     }
     if (r2.status < 200 || r2.status >= 300) {
-      throw new GucError(`GUC portal returned status ${r2.status}.`, "unexpected");
+      throw new GucError("GUC portal returned status " + r2.status + ".", "unexpected");
     }
-    return r2.body;
+
+    const postback = coursePostback(r2.body, path);
+    if (!postback) return r2.body;
+    const cookies = mergeCookies(r1.headers["set-cookie"] ?? [], r2.headers["set-cookie"] ?? []);
+    const r3 = await conn.request("POST", postback.path, {
+      Authorization: "NTLM " + ntlmType3(challenge[1]!, user, password, domain),
+      "Content-Type": "application/x-www-form-urlencoded",
+      Referer: BASE + path,
+      ...(cookies ? { Cookie: cookies } : {}),
+    }, postback.body);
+    if (r3.status === 401) {
+      throw new GucError("GUC rejected the username or password.", "bad_credentials");
+    }
+    if (r3.status < 200 || r3.status >= 300) {
+      throw new GucError("GUC portal returned status " + r3.status + ".", "unexpected");
+    }
+    return r3.body;
   } finally {
     conn.close();
   }
 }
-
 const decode = (s: string) =>
   s
     .replace(/<[^>]*>/g, " ")
