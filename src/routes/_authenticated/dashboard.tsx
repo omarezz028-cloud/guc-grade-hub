@@ -140,23 +140,11 @@ function Grades({ data, onChange }: { data: Data; onChange: () => void }) {
   const sync = useServerFn(syncNow);
   const unlink = useServerFn(unlinkGucAccount);
   const [busy, setBusy] = useState(false);
-  const [showDemoGrade, setShowDemoGrade] = useState(false);
   const byCourse = useMemo(() => {
     const m = new Map<string, Data["grades"]>();
     for (const g of data.grades) m.set(g.course, [...(m.get(g.course) ?? []), g]);
-    if (showDemoGrade) {
-      m.set("DEMO 101 · Sample course", [
-        {
-          id: "demo-grade",
-          course: "DEMO 101 · Sample course",
-          item: "Midterm (sample)",
-          grade: "18/20",
-          updated_at: new Date().toISOString(),
-        },
-      ]);
-    }
     return [...m.entries()];
-  }, [data.grades, showDemoGrade]);
+  }, [data.grades]);
 
   async function run() {
     setBusy(true);
@@ -180,9 +168,6 @@ function Grades({ data, onChange }: { data: Data; onChange: () => void }) {
           )}
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => setShowDemoGrade((visible) => !visible)}>
-            {showDemoGrade ? "Hide sample grade" : "Show sample grade"}
-          </Button>
           <Button onClick={run} disabled={busy}>
             <RefreshCw className={busy ? "animate-spin" : ""} /> Check now
           </Button>
@@ -198,11 +183,6 @@ function Grades({ data, onChange }: { data: Data; onChange: () => void }) {
           </Button>
         </div>
       </div>
-      {showDemoGrade && (
-        <p className="mt-3 text-xs text-muted-foreground">
-          Sample data only — this grade is for checking the dashboard and is not saved or sent to the GUC portal.
-        </p>
-      )}
       {byCourse.length === 0 ? (
         <p className="mt-8 ledger-card p-6 text-muted-foreground">No grades published on the portal yet.</p>
       ) : (
