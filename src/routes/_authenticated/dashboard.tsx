@@ -228,7 +228,7 @@ function Integrations({ data, onChange }: { data: Data; onChange: () => void }) 
           <Copy className="size-3 shrink-0" /> GET {endpoint}
         </button>
         <p className="mt-2 text-xs text-muted-foreground">
-          Send header <code className="font-mono">Authorization: Bearer &lt;your key&gt;</code>
+          Send <code className="font-mono">Authorization: Bearer &lt;your key&gt;</code> or <code className="font-mono">x-api-key: &lt;your key&gt;</code>
         </p>
         <form
           className="mt-4 flex gap-2"
