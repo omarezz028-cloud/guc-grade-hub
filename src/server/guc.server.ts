@@ -69,21 +69,53 @@ const decode = (s: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
-/** Best-effort parser: reads every innermost HTML table and turns rows into grade entries. */
+/** Parse grade tables, using their column headers when the portal provides them. */
 export function parseGrades(html: string): GradeRow[] {
-  const tables = [...html.matchAll(/<table\b((?:(?!<table\b)[\s\S])*?)<\/table>/gi)].map((m) => m[1] ?? "");
+  const tables = [...html.matchAll(/<table\\b((?:(?!<table\\b)[\\s\\S])*?)<\\/table>/gi)].map((m) => m[1] ?? "");
   const preferred = tables.filter((t) => /id="[^"]*(midDg|grade|Dg)[^"]*"/i.test(t.split(">")[0] ?? ""));
   const chosen = preferred.length ? preferred : tables;
   const rows: GradeRow[] = [];
   const seen = new Map<string, number>();
-  for (const t of chosen) {
-    for (const tr of t.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)) {
-      const cells = [...tr[0].matchAll(/<td\b[\s\S]*?<\/td>/gi)].map((c) => decode(c[0]));
-      if (cells.length < 2 || cells.every((c) => !c)) continue;
+  const normalize = (value: string) => value.toLowerCase().replace(/[^a-z0-9%]+/g, " ").trim();
+  const courseLabels = new Set(["course", "course code", "course name", "subject", "subject code"]);
+  const itemLabels = new Set(["item", "assessment", "component", "exam", "exam type", "grade item"]);
+  const gradeLabels = new Set(["grade", "percentage", "percent", "mark", "marks", "score", "result", "obtained"]);
+  const knownLabels = new Set([...courseLabels, ...itemLabels, ...gradeLabels, "date", "type"]);
+
+  for (const table of chosen) {
+    const parsed = [...table.matchAll(/<tr\\b[\\s\\S]*?<\\/tr>/gi)].map((match) => ({
+      html: match[0],
+      cells: [...match[0].matchAll(/<(td|th)\\b[\\s\\S]*?<\\/\\1>/gi)].map((cell) => decode(cell[0])),
+    })).filter((row) => row.cells.length > 0 && row.cells.some(Boolean));
+    const headerIndex = parsed.findIndex(({ html: rowHtml, cells }) => {
+      const labels = cells.map(normalize);
+      const headerLike = /<th\\b/i.test(rowHtml) || labels.some((label) => knownLabels.has(label));
+      return headerLike && labels.filter(Boolean).every((label) => knownLabels.has(label));
+    });
+    const header = headerIndex >= 0 ? parsed[headerIndex]!.cells.map(normalize) : [];
+    const courseColumn = header.findIndex((label) => courseLabels.has(label));
+    const itemColumn = header.findIndex((label) => itemLabels.has(label));
+    const gradeColumn = header.findIndex((label) => gradeLabels.has(label));
+
+    for (let rowIndex = 0; rowIndex < parsed.length; rowIndex++) {
+      if (rowIndex === headerIndex) continue;
+      const cells = parsed[rowIndex]!.cells;
+      if (cells.length < 2) continue;
+      const normalizedCells = cells.map(normalize);
+      if (
+        normalizedCells.some((label) => courseLabels.has(label)) &&
+        normalizedCells.some((label) => gradeLabels.has(label)) &&
+        normalizedCells.every((label) => knownLabels.has(label) || !label)
+      ) continue;
+
       let course = "General";
-      let item: string;
-      let grade: string;
-      if (cells.length >= 3) {
+      let item = "";
+      let grade = "";
+      if (courseColumn >= 0 && gradeColumn >= 0) {
+        course = cells[courseColumn] || course;
+        item = itemColumn >= 0 ? cells[itemColumn] : header[gradeColumn] || "Grade";
+        grade = cells[gradeColumn] ?? "";
+      } else if (cells.length >= 3) {
         course = cells[0] || course;
         item = cells.slice(1, -1).filter(Boolean).join(" – ") || "Grade";
         grade = cells[cells.length - 1] ?? "";
@@ -91,16 +123,16 @@ export function parseGrades(html: string): GradeRow[] {
         item = cells[0] ?? "";
         grade = cells[1] ?? "";
       }
-      if (!grade) continue;
+      if (!grade || gradeLabels.has(normalize(grade))) continue;
+
       const key = `${course}|${item}`;
-      const n = seen.get(key) ?? 0;
-      seen.set(key, n + 1);
-      rows.push({ course, item: n ? `${item} (${n + 1})` : item, grade });
+      const count = seen.get(key) ?? 0;
+      seen.set(key, count + 1);
+      rows.push({ course, item: count ? `${item} (${count + 1})` : item, grade });
     }
   }
   return rows;
 }
-
 export async function fetchGrades(username: string, password: string): Promise<GradeRow[]> {
   const all: GradeRow[] = [];
   for (const p of GRADE_PATHS) {
