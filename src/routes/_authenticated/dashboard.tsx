@@ -150,8 +150,9 @@ function Grades({ data, onChange }: { data: Data; onChange: () => void }) {
     setBusy(true);
     const r = await sync().catch(() => ({ ok: false as const, error: "Connection dropped. Please try again." }));
     setBusy(false);
-    if (r.ok) toast.success(r.changed ? `${r.changed} new or changed grades` : "No new grades");
-    else toast.error(r.error);
+    if (!r.ok) toast.error(r.error);
+    else if (r.total === 0) toast.warning("GUC returned no grade rows. Check the portal for published grades.");
+    else toast.success(r.changed ? `${r.changed} new or changed grades` : "No new grades");
     onChange();
   }
 
