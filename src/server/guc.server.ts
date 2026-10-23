@@ -84,8 +84,8 @@ export function parseGrades(html: string): GradeRow[] {
   const elementLabels = new Set(["element name"]);
   const knownLabels = new Set([...courseLabels, ...itemLabels, ...gradeLabels, ...quizLabels, ...elementLabels, "prof lecturer ta", "date", "type"]);
   const selectedCourse = decode(
-    [...html.matchAll(/<option\\b([^>]*)>([\\s\\S]*?)<\\/option>/gi)]
-      .find((match) => /\\bselected(?:\\s|=|>)/i.test(match[1] ?? ""))?.[2] ?? "",
+    [...html.matchAll(/<option\b([^>]*)>([\s\S]*?)<\\/option>/gi)]
+      .find((match) => /\bselected(?:\s|=|>)/i.test(match[1] ?? ""))?.[2] ?? "",
   );
 
   for (const table of chosen) {
