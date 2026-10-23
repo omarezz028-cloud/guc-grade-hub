@@ -71,7 +71,7 @@ const decode = (s: string) =>
 
 /** Parse grade tables, using their column headers when the portal provides them. */
 export function parseGrades(html: string): GradeRow[] {
-  const tables = [...html.matchAll(/<table\\b((?:(?!<table\\b)[\\s\\S])*?)<\\/table>/gi)].map((m) => m[1] ?? "");
+  const tables = [...html.matchAll(/<table\b((?:(?!<table\b)[\s\S])*?)<\/table>/gi)].map((m) => m[1] ?? "");
   const preferred = tables.filter((t) => /id="[^"]*(midDg|grade|Dg)[^"]*"/i.test(t.split(">")[0] ?? ""));
   const chosen = preferred.length ? preferred : tables;
   const rows: GradeRow[] = [];
@@ -83,13 +83,13 @@ export function parseGrades(html: string): GradeRow[] {
   const knownLabels = new Set([...courseLabels, ...itemLabels, ...gradeLabels, "date", "type"]);
 
   for (const table of chosen) {
-    const parsed = [...table.matchAll(/<tr\\b[\\s\\S]*?<\\/tr>/gi)].map((match) => ({
+    const parsed = [...table.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)].map((match) => ({
       html: match[0],
-      cells: [...match[0].matchAll(/<(td|th)\\b[\\s\\S]*?<\\/\\1>/gi)].map((cell) => decode(cell[0])),
+      cells: [...match[0].matchAll(/<(td|th)\b[\s\S]*?<\/\1>/gi)].map((cell) => decode(cell[0])),
     })).filter((row) => row.cells.length > 0 && row.cells.some(Boolean));
     const headerIndex = parsed.findIndex(({ html: rowHtml, cells }) => {
       const labels = cells.map(normalize);
-      const headerLike = /<th\\b/i.test(rowHtml) || labels.some((label) => knownLabels.has(label));
+      const headerLike = /<th\b/i.test(rowHtml) || labels.some((label) => knownLabels.has(label));
       return headerLike && labels.filter(Boolean).every((label) => knownLabels.has(label));
     });
     const header = headerIndex >= 0 ? parsed[headerIndex]!.cells.map(normalize) : [];
@@ -125,10 +125,10 @@ export function parseGrades(html: string): GradeRow[] {
       }
       if (!grade || gradeLabels.has(normalize(grade))) continue;
 
-      const key = `${course}|${item}`;
+      const key = course + "|" + item;
       const count = seen.get(key) ?? 0;
       seen.set(key, count + 1);
-      rows.push({ course, item: count ? `${item} (${count + 1})` : item, grade });
+      rows.push({ course, item: count ? item + " (" + (count + 1) + ")" : item, grade });
     }
   }
   return rows;
