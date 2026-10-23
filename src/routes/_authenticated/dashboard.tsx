@@ -152,7 +152,8 @@ function Grades({ data, onChange }: { data: Data; onChange: () => void }) {
     setBusy(false);
     if (!r.ok) toast.error(r.error);
     else if (r.total === 0) toast.warning("GUC returned no grade rows. Check the portal for published grades.");
-    else toast.success(r.changed ? `${r.changed} new or changed grades` : "No new grades");
+    else if (r.changed === 0) toast.success(`Checked ${r.total} grade entries; no changes since the last check.`);
+    else toast.success(`${r.changed} new or changed grades (${r.total} total)`);
     onChange();
   }
 
