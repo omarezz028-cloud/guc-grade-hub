@@ -46,7 +46,10 @@ function coursePostback(html: string, currentPath: string): { path: string; body
   const formAttrs = form[1] ?? "";
   const formBody = form[2] ?? "";
   const selects = [...formBody.matchAll(/<select\b([^>]*)>([\s\S]*?)<\/select>/gi)];
-  const select = selects.find((match) => /course|class|subject|semester/i.test(attr(match[1] ?? "", "name") ?? attr(match[1] ?? "", "id") ?? "")) ?? selects[0];
+  const select = selects.find((match) => /smCrsLst$/i.test(attr(match[1] ?? "", "id") ?? "")) ??
+    selects.find((match) => /smCrsLst$/i.test(attr(match[1] ?? "", "name") ?? "")) ??
+    selects.find((match) => /course|class|subject|semester/i.test(attr(match[1] ?? "", "name") ?? attr(match[1] ?? "", "id") ?? "")) ??
+    selects[0];
   if (!select) return null;
   const selectAttrs = select[1] ?? "";
   const selectName = attr(selectAttrs, "name");
@@ -71,6 +74,15 @@ function coursePostback(html: string, currentPath: string): { path: string; body
     if (!name) continue;
     const type = (attr(attrs, "type") ?? "text").toLowerCase();
     if (type === "hidden") fields.append(name, decode(attr(attrs, "value") ?? ""));
+  }
+  // Preserve other already-selected dropdowns, as GUC's cascading form expects
+  // the posted page state to match the displayed course list.
+  for (const other of selects) {
+    const otherName = attr(other[1] ?? "", "name");
+    if (!otherName) continue;
+    const chosen = [...(other[2] ?? "").matchAll(/<option\b([^>]*)>([\s\S]*?)<\/option>/gi)]
+      .find((match) => attr(match[1] ?? "", "selected") !== null);
+    if (chosen) fields.set(otherName, attr(chosen[1] ?? "", "value") ?? decode(chosen[2] ?? ""));
   }
   fields.set(selectName, selectedValue);
   fields.set("__EVENTTARGET", attr(selectAttrs, "name") ?? attr(selectAttrs, "id") ?? "");
@@ -108,12 +120,34 @@ async function ntlmGet(path: string, rawUser: string, password: string): Promise
       throw new GucError("GUC portal returned status " + r2.status + ".", "unexpected");
     }
 
-    const postback = coursePostback(r2.body, path);
-    if (!postback) return r2.body;
-    const cookies = mergeCookies(r1.headers["set-cookie"] ?? [], r2.headers["set-cookie"] ?? []);
+    let pageBody = r2.body;
+    let pagePath = path;
+    let cookies = mergeCookies(r1.headers["set-cookie"] ?? [], r2.headers["set-cookie"] ?? []);
+
+    // GUC first serves a JavaScript bounce to the same page with a v= token.
+    const token = /sTo\('([^']+)'\)/.exec(pageBody)?.[1];
+    if (token) {
+      const target = new URL(pagePath, BASE);
+      target.searchParams.set("v", token);
+      pagePath = target.pathname + target.search;
+      const tokenPage = await conn.request("GET", pagePath, {
+        ...(cookies ? { Cookie: cookies } : {}),
+      });
+      if (tokenPage.status === 401) {
+        throw new GucError("GUC rejected the authenticated page request after its redirect.", "unexpected");
+      }
+      if (tokenPage.status < 200 || tokenPage.status >= 300) {
+        throw new GucError("GUC returned status " + tokenPage.status + " after its page redirect.", "unexpected");
+      }
+      pageBody = tokenPage.body;
+      cookies = mergeCookies(r1.headers["set-cookie"] ?? [], r2.headers["set-cookie"] ?? [], tokenPage.headers["set-cookie"] ?? []);
+    }
+
+    const postback = coursePostback(pageBody, pagePath);
+    if (!postback) return pageBody;
     const r3 = await conn.request("POST", postback.path, {
       "Content-Type": "application/x-www-form-urlencoded",
-      Referer: BASE + path,
+      Referer: BASE + pagePath,
       ...(cookies ? { Cookie: cookies } : {}),
     }, postback.body);
     if (r3.status === 401) {
