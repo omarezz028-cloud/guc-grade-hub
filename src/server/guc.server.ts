@@ -318,7 +318,7 @@ export function parseGrades(html: string, courseOverride?: string): GradeRow[] {
         grade = cells[gradeColumn] ?? "";
       } else if (courseColumn >= 0 && gradeColumn >= 0) {
         course = cells[courseColumn] || course;
-        item = itemColumn >= 0 ? cells[itemColumn] : header[gradeColumn] || "Grade";
+        item = itemColumn >= 0 ? (cells[itemColumn] ?? "Grade") : header[gradeColumn] || "Grade";
         grade = cells[gradeColumn] ?? "";
       } else if (cells.length >= 3) {
         course = cells[0] || course;
