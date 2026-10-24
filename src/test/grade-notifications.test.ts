@@ -21,12 +21,12 @@ vi.mock("@/integrations/supabase/client.server", () => ({
           if (table === "webhooks" && !Object.keys(update).length) {
             resolve({ data: [{ id: "hook", url: "https://receiver.example/hook", signing_secret: "test-only" }], error: null });
           } else {
-            if (table === "webhooks") state.status = String(update.last_status);
+            if (table === "webhooks") state.status = String(update['last_status']);
             else {
-              const key = `${filters.course}|${filters.item}`;
-              if (state.leases.get(key) === filters.lease_token) {
+              const key = `${filters['course']}|${filters['item']}`;
+              if (state.leases.get(key) === filters['lease_token']) {
                 state.leases.delete(key);
-                if (typeof update.sent_grade === "string") state.sent.set(key, update.sent_grade);
+                if (typeof update['sent_grade'] === "string") state.sent.set(key, update['sent_grade']);
               }
             }
             resolve({ error: null });
@@ -106,6 +106,11 @@ describe("Outgoing grade notifications", () => {
   });
 
   it("does not duplicate sends during overlapping checks", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_url, options: RequestInit) => {
+      state.calls.push(String(options.body));
+      await new Promise(resolve => setTimeout(resolve, 20));
+      return new Response(null, { status: 200 });
+    }));
     await Promise.all([sendWebhooks("user", [row]), sendWebhooks("user", [row])]);
     expect(state.calls).toHaveLength(1);
   });
