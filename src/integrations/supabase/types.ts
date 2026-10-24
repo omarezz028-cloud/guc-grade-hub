@@ -107,6 +107,44 @@ export type Database = {
         }
         Relationships: []
       }
+      webhook_grade_deliveries: {
+        Row: {
+          course: string
+          item: string
+          lease_token: string | null
+          leased_until: string | null
+          sent_at: string | null
+          sent_grade: string | null
+          webhook_id: string
+        }
+        Insert: {
+          course: string
+          item: string
+          lease_token?: string | null
+          leased_until?: string | null
+          sent_at?: string | null
+          sent_grade?: string | null
+          webhook_id: string
+        }
+        Update: {
+          course?: string
+          item?: string
+          lease_token?: string | null
+          leased_until?: string | null
+          sent_at?: string | null
+          sent_grade?: string | null
+          webhook_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "webhook_grade_deliveries_webhook_id_fkey"
+            columns: ["webhook_id"]
+            isOneToOne: false
+            referencedRelation: "webhooks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       webhooks: {
         Row: {
           created_at: string
@@ -142,7 +180,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      claim_grade_notification: {
+        Args: {
+          p_course: string
+          p_grade: string
+          p_item: string
+          p_token: string
+          p_webhook_id: string
+        }
+        Returns: boolean
+      }
     }
     Enums: {
       [_ in never]: never

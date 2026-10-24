@@ -1,6 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
+import { isPublicNotificationUrl } from "./grade-notifications";
 
 export const getDashboard = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
@@ -22,7 +23,7 @@ export const getDashboard = createServerFn({ method: "GET" })
 
 export const linkGucAccount = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) =>
+  .inputValidator((d: unknown) =>
     z.object({ username: z.string().trim().min(2).max(120), password: z.string().min(1).max(200) }).parse(d),
   )
   .handler(async ({ data, context }) => {
@@ -54,7 +55,7 @@ export const unlinkGucAccount = createServerFn({ method: "POST" })
 
 export const createApiKey = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ name: z.string().trim().min(1).max(60) }).parse(d))
+  .inputValidator((d: unknown) => z.object({ name: z.string().trim().min(1).max(60) }).parse(d))
   .handler(async ({ data, context }) => {
     const { randomHex, sha256Hex } = await import("@/server/crypto.server");
     const key = `guc_${randomHex(24)}`;
@@ -71,7 +72,7 @@ export const createApiKey = createServerFn({ method: "POST" })
 
 export const deleteApiKey = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await context.supabase.from("api_keys").delete().eq("id", data.id);
     return { ok: true };
@@ -79,23 +80,29 @@ export const deleteApiKey = createServerFn({ method: "POST" })
 
 export const addWebhook = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) =>
-    z.object({ url: z.string().url().max(500).refine((u) => u.startsWith("https://"), "Use an https:// link") }).parse(d),
+  .inputValidator((d: unknown) =>
+    z.object({ url: z.string().url().max(500).refine(isPublicNotificationUrl, "Use a public HTTPS address") }).parse(d),
   )
   .handler(async ({ data, context }) => {
     const { randomHex } = await import("@/server/crypto.server");
     const secret = `whsec_${randomHex(24)}`;
     const { supabaseAdmin } = await import("@/integrations/supabase/client.server");
-    const { error } = await supabaseAdmin
+    const { data: hook, error } = await supabaseAdmin
       .from("webhooks")
-      .insert({ user_id: context.userId, url: data.url, signing_secret: secret });
+      .insert({ user_id: context.userId, url: data.url, signing_secret: secret }).select("id").single();
     if (error) throw new Error(error.message);
-    return { secret };
+    const { data: grades, error: gradeError } = await context.supabase.from("grades").select("course,item,grade");
+    if (gradeError) throw new Error(gradeError.message);
+    if (hook) {
+      const { baselineWebhooks } = await import("@/server/sync.server");
+      await baselineWebhooks(context.userId, grades ?? [], hook.id);
+    }
+    return { ok: true };
   });
 
 export const deleteWebhook = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .validator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
   .handler(async ({ data, context }) => {
     await context.supabase.from("webhooks").delete().eq("id", data.id);
     return { ok: true };
@@ -103,10 +110,10 @@ export const deleteWebhook = createServerFn({ method: "POST" })
 
 export const testWebhooks = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
-  .handler(async ({ context }) => {
+  .inputValidator((d: unknown) => z.object({ id: z.string().uuid() }).parse(d))
+  .handler(async ({ data, context }) => {
     const { sendWebhooks } = await import("@/server/sync.server");
-    await sendWebhooks(context.userId, [
-      { course: "TEST 101", item: "Test notification", grade: "10/10", previous: null },
-    ]);
-    return { ok: true };
+    return sendWebhooks(context.userId, [
+      { course: "TEST 101", item: "Test notification", grade: "10 / 10" },
+    ], data.id);
   });

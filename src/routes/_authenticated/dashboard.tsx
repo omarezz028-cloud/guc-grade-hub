@@ -1,7 +1,7 @@
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { queryOptions, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { RefreshCw, Trash2, Copy, Eye, EyeOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
@@ -29,6 +29,8 @@ export const Route = createFileRoute("/_authenticated/dashboard")({
       { name: "description", content: "Your collected GUC grades, API keys and notifications." },
       { property: "og:title", content: "My grades — GradeWatch" },
       { property: "og:description", content: "Your collected GUC grades, API keys and notifications." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
     ],
   }),
   loader: ({ context }) => context.queryClient.ensureQueryData(dashQuery),
@@ -146,6 +148,9 @@ function Grades({ data, onChange }: { data: Data; onChange: () => void }) {
     return [...m.entries()];
   }, [data.grades]);
 
+  const account = data.account;
+  if (!account) return null;
+
   async function run() {
     setBusy(true);
     const r = await sync().catch(() => ({ ok: false as const, error: "Connection dropped. Please try again." }));
@@ -163,10 +168,10 @@ function Grades({ data, onChange }: { data: Data; onChange: () => void }) {
         <div>
           <h1 className="text-5xl">Your grades</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {data.account!.guc_username} · last checked {fmt(data.account!.last_synced_at)} · checks every few hours
+            {account.guc_username} · last checked {fmt(account.last_synced_at)} · checks every few hours
           </p>
-          {data.account!.last_error && (
-            <p className="mt-1 text-sm text-destructive">Last check failed: {data.account!.last_error}</p>
+          {account.last_error && (
+            <p className="mt-1 text-sm text-destructive">Last check failed: {account.last_error}</p>
           )}
         </div>
         <div className="flex gap-2">
@@ -217,7 +222,21 @@ function Integrations({ data, onChange }: { data: Data; onChange: () => void }) 
   const [keyName, setKeyName] = useState("");
   const [hookUrl, setHookUrl] = useState("");
   const [reveal, setReveal] = useState<{ label: string; value: string } | null>(null);
-  const endpoint = typeof window !== "undefined" ? `${window.location.origin}/api/public/v1/grades` : "";
+  const [testingId, setTestingId] = useState<string | null>(null);
+  const [endpoint, setEndpoint] = useState("");
+  useEffect(() => setEndpoint(`${window.location.origin}/api/public/v1/grades`), []);
+
+  async function sendTest(id: string) {
+    setTestingId(id);
+    try {
+      const results = await test({ data: { id } });
+      const result = results[0];
+      if (result?.ok) toast.success(`Test: ${result.status}`);
+      else toast.error(`Test: ${result?.status ?? "No response"}`);
+      onChange();
+    } catch { toast.error("Could not send test. Please try again."); }
+    finally { setTestingId(null); }
+  }
 
   return (
     <section className="mt-16 grid gap-6 md:grid-cols-2">
@@ -267,8 +286,8 @@ function Integrations({ data, onChange }: { data: Data; onChange: () => void }) 
           onSubmit={async (e) => {
             e.preventDefault();
             try {
-              const r = await mkHook({ data: { url: hookUrl } });
-              setReveal({ label: "Signing secret (shown once) — used to verify messages", value: r.secret });
+              await mkHook({ data: { url: hookUrl } });
+              toast.success("Notification address added");
               setHookUrl("");
               onChange();
             } catch {
@@ -285,20 +304,19 @@ function Integrations({ data, onChange }: { data: Data; onChange: () => void }) 
               <span className="min-w-0">
                 <span className="block truncate font-mono text-xs">{h.url}</span>
                 <span className="block text-xs text-muted-foreground">
-                  last sent {fmt(h.last_called_at)} {h.last_status && `· ${h.last_status}`}
+                  last attempt {fmt(h.last_called_at)} {h.last_status && `· ${h.last_status}`}
                 </span>
               </span>
-              <Button size="icon" variant="ghost" onClick={async () => { await rmHook({ data: { id: h.id } }); onChange(); }}>
+              <Button variant="outline" size="sm" disabled={testingId !== null} onClick={() => sendTest(h.id)}>
+                {testingId === h.id ? "Sending…" : "Send test"}
+              </Button>
+              <Button aria-label="Delete notification address" size="icon" variant="ghost" onClick={async () => { await rmHook({ data: { id: h.id } }); onChange(); }}>
                 <Trash2 />
               </Button>
             </li>
           ))}
         </ul>
-        {data.webhooks.length > 0 && (
-          <Button variant="outline" size="sm" className="mt-3" onClick={async () => { await test(); toast.success("Test sent"); onChange(); }}>
-            Send test notification
-          </Button>
-        )}
+
       </div>
       {reveal && (
         <div className="ledger-card p-5 md:col-span-2">
