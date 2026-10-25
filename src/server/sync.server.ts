@@ -258,8 +258,8 @@ export async function linkAndSyncWithRows(userId: string, username: string, pass
 
 /** Existing callers keep receiving only the summary; grade rows stay server-side. */
 export async function linkAndSync(userId: string, username: string, password: string) {
-  const { rows: _rows, ...result } = await linkAndSyncWithRows(userId, username, password);
-  return result;
+  const result = await linkAndSyncWithRows(userId, username, password);
+  return { total: result.total, changed: result.changed };
 }
 
 export async function syncAccount(userId: string) {
