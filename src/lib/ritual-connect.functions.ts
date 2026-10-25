@@ -122,18 +122,23 @@ export const connectToRitual = createServerFn({ method: "POST" })
     } catch (error) {
       await restoreConnection();
       const cause = error && typeof error === "object" && "cause" in error
-        ? (error as { cause?: { code?: unknown } }).cause?.code
+        ? (error as { cause?: { code?: unknown; message?: unknown } }).cause
         : undefined;
-      const networkCode = typeof cause === "string"
-        ? cause
-        : controller.signal.aborted
-          ? "timeout"
-          : error instanceof Error
-            ? error.name
-            : "unknown";
+      const causeCode = cause && typeof cause.code === "string" ? cause.code : "";
+      const causeMessage = cause && typeof cause.message === "string" ? cause.message : "";
+      const rawMessage = error instanceof Error ? error.message : "";
+      const detail = controller.signal.aborted
+        ? "timeout"
+        : [causeCode, causeMessage || rawMessage]
+            .filter(Boolean)
+            .join(": ")
+            .replace(/https?:\\/\\/[^\\s]+/gi, "[endpoint]")
+            .split(secret).join("[redacted]")
+            .split(data.state).join("[redacted]")
+            .slice(0, 120) || "unknown network error";
       return {
         ok: false as const,
-        error: "Could not reach Ritual (HTTPS " + networkCode + "). Check the Ritual app deployment and try again.",
+        error: "Could not reach Ritual (HTTPS: " + detail + "). Check the Ritual app deployment and try again.",
       };
     } finally {
       clearTimeout(timer);
