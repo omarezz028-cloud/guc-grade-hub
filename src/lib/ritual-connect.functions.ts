@@ -160,17 +160,21 @@ export const connectToRitual = createServerFn({ method: "POST" })
           error: "Ritual redirected the connection (HTTP " + response.status + "). Its grades endpoint must accept a direct POST.",
         };
       }
+      const redirectedController = new AbortController();
+      const redirectedTimer = setTimeout(() => redirectedController.abort(), 30_000);
       try {
         response = await fetch(target.toString(), {
           method: "POST",
           redirect: "error",
-          signal: controller.signal,
+          signal: redirectedController.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ connect: true, state: data.state, secret }),
         });
       } catch {
         await restoreConnection();
         return { ok: false as const, error: "Ritual's redirected HTTPS request failed." };
+      } finally {
+        clearTimeout(redirectedTimer);
       }
     }
 
