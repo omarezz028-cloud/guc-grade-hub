@@ -114,7 +114,7 @@ export const connectToRitual = createServerFn({ method: "POST" })
     try {
       response = await fetch(RITUAL_CONNECT_ENDPOINT, {
         method: "POST",
-        redirect: "error",
+        redirect: "manual",
         signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ connect: true, state: data.state, secret }),
@@ -137,6 +137,41 @@ export const connectToRitual = createServerFn({ method: "POST" })
       };
     } finally {
       clearTimeout(timer);
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      let target: URL | null = null;
+      try {
+        target = location ? new URL(location, RITUAL_CONNECT_ENDPOINT) : null;
+      } catch {
+        target = null;
+      }
+      const original = new URL(RITUAL_CONNECT_ENDPOINT);
+      const safeRedirect =
+        target?.origin === original.origin &&
+        target.pathname === original.pathname &&
+        target.search === "" &&
+        target.hash === "";
+      if (!safeRedirect || (response.status !== 307 && response.status !== 308)) {
+        await restoreConnection();
+        return {
+          ok: false as const,
+          error: "Ritual redirected the connection (HTTP " + response.status + "). Its grades endpoint must accept a direct POST.",
+        };
+      }
+      try {
+        response = await fetch(target.toString(), {
+          method: "POST",
+          redirect: "error",
+          signal: controller.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ connect: true, state: data.state, secret }),
+        });
+      } catch {
+        await restoreConnection();
+        return { ok: false as const, error: "Ritual's redirected HTTPS request failed." };
+      }
     }
 
     if (response.status !== 200) {
