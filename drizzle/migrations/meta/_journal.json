@@ -15,6 +15,13 @@
       "when": 1792872565866,
       "tag": "0001_grade_notification_delivery_history",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1792920000000,
+      "tag": "0002_ritual_connections",
+      "breakpoints": true
     }
   ]
 }

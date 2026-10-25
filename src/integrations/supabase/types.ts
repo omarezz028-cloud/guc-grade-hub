@@ -107,6 +107,77 @@ export type Database = {
         }
         Relationships: []
       }
+      ritual_connections: {
+        Row: {
+          connected_at: string
+          enabled: boolean
+          id: string
+          last_sent_at: string | null
+          last_status: string | null
+          secret_cipher: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          connected_at?: string
+          enabled?: boolean
+          id?: string
+          last_sent_at?: string | null
+          last_status?: string | null
+          secret_cipher?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          connected_at?: string
+          enabled?: boolean
+          id?: string
+          last_sent_at?: string | null
+          last_status?: string | null
+          secret_cipher?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      ritual_grade_deliveries: {
+        Row: {
+          connection_id: string
+          course: string
+          item: string
+          lease_token: string | null
+          leased_until: string | null
+          sent_at: string | null
+          sent_grade: string | null
+        }
+        Insert: {
+          connection_id: string
+          course: string
+          item: string
+          lease_token?: string | null
+          leased_until?: string | null
+          sent_at?: string | null
+          sent_grade?: string | null
+        }
+        Update: {
+          connection_id?: string
+          course?: string
+          item?: string
+          lease_token?: string | null
+          leased_until?: string | null
+          sent_at?: string | null
+          sent_grade?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ritual_grade_deliveries_connection_id_fkey"
+            columns: ["connection_id"]
+            isOneToOne: false
+            referencedRelation: "ritual_connections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       webhook_grade_deliveries: {
         Row: {
           course: string
@@ -180,6 +251,16 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_ritual_grade: {
+        Args: {
+          p_connection_id: string
+          p_course: string
+          p_grade: string
+          p_item: string
+          p_token: string
+        }
+        Returns: boolean
+      }
       claim_grade_notification: {
         Args: {
           p_course: string

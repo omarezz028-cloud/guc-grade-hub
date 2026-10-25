@@ -1,0 +1,130 @@
+import { createServerFn } from "@tanstack/react-start";
+import { z } from "zod";
+
+import { encryptText, randomHex } from "@/server/crypto.server";
+import { baselineRitualGrades, linkAndSync } from "@/server/sync.server";
+
+const RITUAL_RETURN_ORIGIN = "https://habit-buddy-app-47.lovable.app";
+const RITUAL_CONNECT_ENDPOINT = RITUAL_RETURN_ORIGIN + "/api/public/grades";
+
+async function responseError(response: Response, secret: string, state: string): Promise<string> {
+  try {
+    const body = (await response.json()) as { error?: unknown };
+    if (typeof body.error === "string") {
+      return body.error.slice(0, 240).split(secret).join("[redacted]").split(state).join("[redacted]");
+    }
+  } catch {
+    /* Keep the generic status when Ritual returned no JSON error. */
+  }
+  return "Ritual could not finish the connection.";
+}
+
+/** Completes the GUC sign-in and exchanges a one-time Ritual state for a server-only grade secret. */
+export const connectToRitual = createServerFn({ method: "POST" })
+  .inputValidator((d: unknown) =>
+    z.object({
+      username: z.string().trim().min(2).max(120),
+      password: z.string().min(1).max(200),
+      state: z.string().length(64),
+      returnUrl: z.string().url().max(2048),
+    }).parse(d),
+  )
+  .handler(async ({ data }) => {
+    if (!/^[a-f0-9]{64}$/i.test(data.state)) {
+      return { ok: false as const, error: "This Ritual connection link is invalid. Start again in Ritual." };
+    }
+
+    let returnUrl: URL;
+    try {
+      returnUrl = new URL(data.returnUrl);
+    } catch {
+      return { ok: false as const, error: "The return address is invalid." };
+    }
+    if (!data.returnUrl.startsWith(RITUAL_RETURN_ORIGIN + "/") || returnUrl.origin !== RITUAL_RETURN_ORIGIN) {
+      return { ok: false as const, error: "This return address is not allowed. Start again from Ritual." };
+    }
+
+    const { supabaseAdmin: db } = await import("@/integrations/supabase/client.server");
+    const { data: existingAccount, error: accountError } = await db
+      .from("guc_accounts")
+      .select("user_id")
+      .eq("guc_username", data.username)
+      .limit(1)
+      .maybeSingle();
+    if (accountError) {
+      return { ok: false as const, error: "Could not prepare the GUC account. Please try again." };
+    }
+
+    const userId = existingAccount?.user_id ?? crypto.randomUUID();
+    try {
+      // GUC uses NTLM on each background connection, so the password is encrypted at rest for scheduled sync.
+      await linkAndSync(userId, data.username, data.password);
+    } catch (error) {
+      return {
+        ok: false as const,
+        error: error instanceof Error ? error.message : "Could not sign in to GUC.",
+      };
+    }
+
+    const { data: previousConnection } = await db
+      .from("ritual_connections")
+      .select("id,user_id,secret_cipher,enabled,connected_at,last_status,last_sent_at,updated_at")
+      .eq("user_id", userId)
+      .maybeSingle();
+    const restoreConnection = async () => {
+      if (previousConnection) {
+        await db.from("ritual_connections").upsert(previousConnection, { onConflict: "user_id" });
+      } else {
+        await db.from("ritual_connections").delete().eq("user_id", userId);
+      }
+    };
+    const secret = randomHex(32);
+    const now = new Date().toISOString();
+    const { error: saveError } = await db.from("ritual_connections").upsert({
+      id: previousConnection?.id ?? crypto.randomUUID(),
+      user_id: userId,
+      secret_cipher: await encryptText(secret),
+      enabled: true,
+      connected_at: now,
+      last_status: "Connecting to Ritual.",
+      last_sent_at: previousConnection?.last_sent_at ?? null,
+      updated_at: now,
+    }, { onConflict: "user_id" });
+    if (saveError) {
+      return { ok: false as const, error: "Could not securely prepare the Ritual connection. Please try again." };
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    let response: Response;
+    try {
+      response = await fetch(RITUAL_CONNECT_ENDPOINT, {
+        method: "POST",
+        redirect: "error",
+        signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ connect: true, state: data.state, secret }),
+      });
+    } catch {
+      await restoreConnection();
+      return { ok: false as const, error: "Could not reach Ritual. Check your connection and try again." };
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (response.status !== 200) {
+      const detail = await responseError(response, secret, data.state);
+      await restoreConnection(db, userId, previousConnection);
+      return {
+        ok: false as const,
+        error: "Ritual returned HTTP " + response.status + ": " + detail,
+      };
+    }
+
+    try {
+      await baselineRitualGrades(userId);
+    } catch {
+      // The handshake succeeded; keep the connection and let the next sync retry delivery setup.
+    }
+    return { ok: true as const, returnUrl: data.returnUrl };
+  });

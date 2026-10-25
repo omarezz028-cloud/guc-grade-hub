@@ -47,8 +47,12 @@ async function applyGrades(userId: string, rows: GradeRow[], notify: boolean) {
     const { error } = await db.from("grades").upsert(upserts, { onConflict: "user_id,course,item" });
     if (error) throw new Error(error.message);
   }
-  if (notify) await sendWebhooks(userId, rows);
-  else await baselineWebhooks(userId, rows);
+  if (notify) {
+    await sendWebhooks(userId, rows);
+    await sendRitualGrades(userId, rows);
+  } else {
+    await baselineWebhooks(userId, rows);
+  }
   return { total: rows.length, changed: changes.length };
 }
 
@@ -68,6 +72,134 @@ export async function baselineWebhooks(userId: string, rows: GradeRow[], webhook
       onConflict: "webhook_id,course,item", ignoreDuplicates: true,
     });
     if (error) throw new Error(error.message);
+  }
+}
+
+function ritualGradeValue(raw: string): string | null {
+  const match = /^\s*(\d+(?:\.\d+)?)\s*\/\s*(\d+(?:\.\d+)?)\s*$/.exec(raw);
+  return match ? match[1] + " / " + match[2] : null;
+}
+
+export async function baselineRitualGrades(userId: string) {
+  const db = await admin();
+  const { data: connection, error: connectionError } = await db
+    .from("ritual_connections")
+    .select("id")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (connectionError) throw new Error(connectionError.message);
+  if (!connection) return;
+
+  const { data: grades, error: gradesError } = await db
+    .from("grades")
+    .select("course,item,grade")
+    .eq("user_id", userId);
+  if (gradesError) throw new Error(gradesError.message);
+  const now = new Date().toISOString();
+  const baseline = (grades ?? []).flatMap((row) => {
+    const grade = ritualGradeValue(row.grade);
+    return grade
+      ? [{ connection_id: connection.id, course: row.course, item: row.item, sent_grade: grade, sent_at: now }]
+      : [];
+  });
+  if (baseline.length) {
+    const { error } = await db.from("ritual_grade_deliveries").upsert(baseline, {
+      onConflict: "connection_id,course,item",
+    });
+    if (error) throw new Error(error.message);
+  }
+}
+
+async function sendRitualGrades(userId: string, rows: GradeRow[]) {
+  const db = await admin();
+  const { data: connection, error: connectionError } = await db
+    .from("ritual_connections")
+    .select("id,secret_cipher,enabled")
+    .eq("user_id", userId)
+    .maybeSingle();
+  if (connectionError) throw new Error(connectionError.message);
+  if (!connection?.enabled || !connection.secret_cipher) return;
+
+  const secret = await decryptText(connection.secret_cipher);
+  for (const row of rows) {
+    const grade = ritualGradeValue(row.grade);
+    if (!grade) continue;
+    const leaseToken = crypto.randomUUID();
+    const { data: claimed, error: claimError } = await db.rpc("claim_ritual_grade", {
+      p_connection_id: connection.id,
+      p_course: row.course,
+      p_item: row.item,
+      p_grade: grade,
+      p_token: leaseToken,
+    });
+    if (claimError) throw new Error(claimError.message);
+    if (!claimed) continue;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
+    let response: Response;
+    try {
+      response = await fetch("https://habit-buddy-app-47.lovable.app/api/public/grades", {
+        method: "POST",
+        redirect: "error",
+        signal: controller.signal,
+        headers: {
+          Authorization: "Bearer " + secret,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ course: row.course, item: row.item, grade }),
+      });
+    } catch {
+      await db
+        .from("ritual_grade_deliveries")
+        .update({ lease_token: null, leased_until: null })
+        .eq("connection_id", connection.id)
+        .eq("course", row.course)
+        .eq("item", row.item)
+        .eq("lease_token", leaseToken);
+      await db.from("ritual_connections").update({ last_status: "Delivery failed; it will retry." }).eq("id", connection.id);
+      continue;
+    } finally {
+      clearTimeout(timer);
+    }
+
+    if (response.status === 401) {
+      await db
+        .from("ritual_connections")
+        .update({
+          secret_cipher: null,
+          enabled: false,
+          last_status: "Ritual disconnected. Reconnect from Ritual to resume grade delivery.",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", connection.id);
+      break;
+    }
+    if (response.status !== 200) {
+      await db
+        .from("ritual_grade_deliveries")
+        .update({ lease_token: null, leased_until: null })
+        .eq("connection_id", connection.id)
+        .eq("course", row.course)
+        .eq("item", row.item)
+        .eq("lease_token", leaseToken);
+      await db.from("ritual_connections").update({ last_status: "Ritual returned HTTP " + response.status + "; it will retry." }).eq("id", connection.id);
+      continue;
+    }
+
+    const now = new Date().toISOString();
+    const { error: deliveryError } = await db
+      .from("ritual_grade_deliveries")
+      .update({ sent_grade: grade, sent_at: now, lease_token: null, leased_until: null })
+      .eq("connection_id", connection.id)
+      .eq("course", row.course)
+      .eq("item", row.item)
+      .eq("lease_token", leaseToken);
+    if (deliveryError) throw new Error(deliveryError.message);
+    await db
+      .from("ritual_connections")
+      .update({ last_status: "Grade sent successfully.", last_sent_at: now })
+      .eq("id", connection.id);
   }
 }
 
