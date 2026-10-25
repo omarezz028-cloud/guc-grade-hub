@@ -109,7 +109,7 @@ export const connectToRitual = createServerFn({ method: "POST" })
     }
 
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
+    const timer = setTimeout(() => controller.abort(), 30_000);
     let response: Response;
     try {
       response = await fetch(RITUAL_CONNECT_ENDPOINT, {
@@ -119,9 +119,22 @@ export const connectToRitual = createServerFn({ method: "POST" })
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ connect: true, state: data.state, secret }),
       });
-    } catch {
+    } catch (error) {
       await restoreConnection();
-      return { ok: false as const, error: "Could not reach Ritual. Check your connection and try again." };
+      const cause = error && typeof error === "object" && "cause" in error
+        ? (error as { cause?: { code?: unknown } }).cause?.code
+        : undefined;
+      const networkCode = typeof cause === "string"
+        ? cause
+        : controller.signal.aborted
+          ? "timeout"
+          : error instanceof Error
+            ? error.name
+            : "unknown";
+      return {
+        ok: false as const,
+        error: "Could not reach Ritual (HTTPS " + networkCode + "). Check the Ritual app deployment and try again.",
+      };
     } finally {
       clearTimeout(timer);
     }
