@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { encryptText, randomHex } from "@/server/crypto.server";
-import { baselineRitualGrades, linkAndSync } from "@/server/sync.server";
+import { linkAndSync, syncAccount } from "@/server/sync.server";
 
 const RITUAL_RETURN_ORIGIN = "https://habit-buddy-app-47.lovable.app";
 const RITUAL_CONNECT_ENDPOINT = RITUAL_RETURN_ORIGIN + "/api/public/grades";
@@ -122,7 +122,7 @@ export const connectToRitual = createServerFn({ method: "POST" })
     }
 
     try {
-      await baselineRitualGrades(userId);
+      await syncAccount(userId);
     } catch {
       // The handshake succeeded; keep the connection and let the next sync retry delivery setup.
     }
