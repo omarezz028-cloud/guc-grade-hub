@@ -90,7 +90,7 @@ export async function sendWebhooks(userId: string, rows: GradeRow[], testWebhook
         if (error) throw new Error(error.message);
         if (!claimed) continue;
       }
-      const result = await postGradeNotification(hook.url, row, process.env['RITUAL_SECRET'], hook.signing_secret, sign);
+      const result = await postGradeNotification(hook.url, row, process.env['RITUAL_SECRET']?.trim(), hook.signing_secret, sign);
       const now = new Date().toISOString();
       if (!testWebhookId) {
         const { error } = await db.from("webhook_grade_deliveries").update({
