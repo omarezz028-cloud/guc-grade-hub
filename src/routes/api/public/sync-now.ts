@@ -1,7 +1,13 @@
-import { timingSafeEqual } from "node:crypto";
 import { createFileRoute } from "@tanstack/react-router";
 
 const lastManualSync = new Map<string, number>();
+
+function sameHash(a: string, b: string): boolean {
+  if (a.length !== 64 || b.length !== 64) return false;
+  let mismatch = 0;
+  for (let i = 0; i < 64; i++) mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return mismatch === 0;
+}
 
 export const Route = createFileRoute("/api/public/sync-now")({
   server: {
@@ -22,13 +28,13 @@ export const Route = createFileRoute("/api/public/sync-now")({
           return Response.json({ error: "Could not check the GUC connection." }, { status: 500, headers: { "Cache-Control": "no-store" } });
         }
 
-        const supplied = Buffer.from(bearer.toLowerCase(), "hex");
+        const supplied = bearer.toLowerCase();
         let userId: string | null = null;
         for (const connection of connections ?? []) {
           if (!connection.secret_cipher) continue;
           try {
-            const expected = Buffer.from(await sha256Hex(await decryptText(connection.secret_cipher)), "hex");
-            if (expected.length === supplied.length && timingSafeEqual(expected, supplied)) {
+            const expected = await sha256Hex(await decryptText(connection.secret_cipher));
+            if (sameHash(expected, supplied)) {
               userId = connection.user_id;
               break;
             }
