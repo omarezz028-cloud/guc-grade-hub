@@ -91,7 +91,13 @@ export const connectToRitual = createServerFn({ method: "POST" })
       updated_at: now,
     }, { onConflict: "user_id" });
     if (saveError) {
-      return { ok: false as const, error: "Could not securely prepare the Ritual connection. Please try again." };
+      const schemaUnavailable = ["PGRST205", "PGRST204", "42P01", "42703"].includes(saveError.code);
+      return {
+        ok: false as const,
+        error: schemaUnavailable
+          ? "GUC's Ritual connection storage is still being prepared. Wait for the latest database migration to finish, then start a new connection from Ritual."
+          : "Could not securely prepare the Ritual connection. Please try again.",
+      };
     }
 
     const controller = new AbortController();
