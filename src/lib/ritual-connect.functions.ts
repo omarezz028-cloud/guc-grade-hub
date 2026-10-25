@@ -66,21 +66,25 @@ export const connectToRitual = createServerFn({ method: "POST" })
       };
     }
 
-    const { data: previousConnection } = await db
+    const { data: previousConnection, error: readConnectionError } = await db
       .from("ritual_connections")
       .select("id,user_id,secret_cipher,enabled,connected_at,last_status,last_sent_at,updated_at")
       .eq("user_id", userId)
       .maybeSingle();
+    if (readConnectionError) {
+      const code = readConnectionError.code || "unknown";
+      return { ok: false as const, error: "Could not read Ritual connection storage (database code: " + code + ")." };
+    }
     const restoreConnection = async () => {
       if (previousConnection) {
-        await db.from("ritual_connections").upsert(previousConnection, { onConflict: "user_id" });
+        await db.from("ritual_connections").update(previousConnection).eq("user_id", userId);
       } else {
         await db.from("ritual_connections").delete().eq("user_id", userId);
       }
     };
     const secret = randomHex(32);
     const now = new Date().toISOString();
-    const { error: saveError } = await db.from("ritual_connections").upsert({
+    const connectionValues = {
       id: previousConnection?.id ?? crypto.randomUUID(),
       user_id: userId,
       secret_cipher: await encryptText(secret),
@@ -89,14 +93,18 @@ export const connectToRitual = createServerFn({ method: "POST" })
       last_status: "Connecting to Ritual.",
       last_sent_at: previousConnection?.last_sent_at ?? null,
       updated_at: now,
-    }, { onConflict: "user_id" });
+    };
+    const { error: saveError } = previousConnection
+      ? await db.from("ritual_connections").update(connectionValues).eq("user_id", userId)
+      : await db.from("ritual_connections").insert(connectionValues);
     if (saveError) {
-      const schemaUnavailable = ["PGRST205", "PGRST204", "42P01", "42703"].includes(saveError.code);
+      const code = saveError.code || "unknown";
+      const schemaUnavailable = ["PGRST205", "PGRST204", "42P01", "42703"].includes(code);
       return {
         ok: false as const,
         error: schemaUnavailable
-          ? "GUC's Ritual connection storage is still being prepared. Wait for the latest database migration to finish, then start a new connection from Ritual."
-          : "Could not securely prepare the Ritual connection. Please try again.",
+          ? "GUC's Ritual connection storage is not ready (database code: " + code + "). Wait for the latest migration, then start a new connection from Ritual."
+          : "Could not securely prepare the Ritual connection (database code: " + code + "). Please share this code with support.",
       };
     }
 
