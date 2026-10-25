@@ -3,7 +3,7 @@ import { queryOptions, useQueryClient, useSuspenseQuery } from "@tanstack/react-
 import { useServerFn } from "@tanstack/react-start";
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { RefreshCw, Trash2, Copy, Eye, EyeOff } from "lucide-react";
+import { RefreshCw, Trash2, Copy, Eye, EyeOff, ExternalLink } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -300,19 +300,27 @@ function Integrations({ data, onChange }: { data: Data; onChange: () => void }) 
         </form>
         <ul className="mt-4 divide-y text-sm">
           {data.webhooks.map((h) => (
-            <li key={h.id} className="flex items-center justify-between gap-2 py-2">
-              <span className="min-w-0">
-                <span className="block truncate font-mono text-xs">{h.url}</span>
+            <li key={h.id} className="flex flex-wrap items-center justify-between gap-2 py-3">
+              <span className="min-w-0 w-full">
+                <a href={h.url} target="_blank" rel="noopener noreferrer" className="block break-all font-mono text-xs text-primary underline underline-offset-4">{h.url}</a>
                 <span className="block text-xs text-muted-foreground">
                   last attempt {fmt(h.last_called_at)} {h.last_status && `· ${h.last_status}`}
                 </span>
               </span>
+              <div className="flex items-center gap-1">
+                <Button asChild variant="ghost" size="icon">
+                  <a href={h.url} target="_blank" rel="noopener noreferrer" aria-label="Open notification link in a new tab" title="Open notification link in a new tab"><ExternalLink /></a>
+                </Button>
+                <Button variant="ghost" size="icon" aria-label="Copy notification link" title="Copy notification link" onClick={() => copy(h.url)}><Copy /></Button>
+              </div>
+              <div className="flex items-center gap-1">
               <Button variant="outline" size="sm" disabled={testingId !== null} onClick={() => sendTest(h.id)}>
                 {testingId === h.id ? "Sending…" : "Send test"}
               </Button>
               <Button aria-label="Delete notification address" size="icon" variant="ghost" onClick={async () => { await rmHook({ data: { id: h.id } }); onChange(); }}>
                 <Trash2 />
               </Button>
+              </div>
             </li>
           ))}
         </ul>
