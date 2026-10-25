@@ -12,6 +12,11 @@ function sameHash(a: string, b: string): boolean {
 export const Route = createFileRoute("/api/public/sync-now")({
   server: {
     handlers: {
+      GET: async () =>
+        Response.json(
+          { status: "ok", endpoint: "/api/public/sync-now", methods: ["POST"] },
+          { headers: { "Cache-Control": "no-store" } },
+        ),
       POST: async ({ request }) => {
         const bearer = request.headers.get("authorization")?.match(/^Bearer\s+([a-f0-9]{64})$/i)?.[1];
         if (!bearer) {
