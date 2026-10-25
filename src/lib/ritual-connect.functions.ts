@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 
 import { encryptText, randomHex } from "@/server/crypto.server";
-import { linkAndSync, syncAccount } from "@/server/sync.server";
+import { linkAndSyncWithRows, sendRitualGrades } from "@/server/sync.server";
 
 const RITUAL_RETURN_ORIGIN = "https://habit-buddy-app-47.lovable.app";
 const RITUAL_CONNECT_ENDPOINT = RITUAL_RETURN_ORIGIN + "/api/public/grades";
@@ -56,9 +56,11 @@ export const connectToRitual = createServerFn({ method: "POST" })
     }
 
     const userId = existingAccount?.user_id ?? crypto.randomUUID();
+    let initialRows: { course: string; item: string; grade: string }[];
     try {
-      // GUC uses NTLM on each background connection, so the password is encrypted at rest for scheduled sync.
-      await linkAndSync(userId, data.username, data.password);
+      // Use the successful login fetch for Ritual's first delivery; don't open a second GUC session.
+      const linked = await linkAndSyncWithRows(userId, data.username, data.password);
+      initialRows = linked.rows;
     } catch (error) {
       return {
         ok: false as const,
@@ -193,9 +195,13 @@ export const connectToRitual = createServerFn({ method: "POST" })
     }
 
     try {
-      await syncAccount(userId);
+      await sendRitualGrades(userId, initialRows);
     } catch {
-      // The handshake succeeded; keep the connection and let the next sync retry delivery setup.
+      // The handshake succeeded; scheduled sync will retry this delivery if it failed.
+      await db.from("ritual_connections").update({
+        last_status: "Initial grade delivery failed; it will retry on the next sync.",
+        updated_at: new Date().toISOString(),
+      }).eq("user_id", userId);
     }
     return { ok: true as const, returnUrl: data.returnUrl };
   });
