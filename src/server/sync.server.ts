@@ -110,7 +110,7 @@ export async function baselineRitualGrades(userId: string) {
   }
 }
 
-async function sendRitualGrades(userId: string, rows: GradeRow[]) {
+export async function sendRitualGrades(userId: string, rows: GradeRow[]) {
   const db = await admin();
   const { data: connection, error: connectionError } = await db
     .from("ritual_connections")
@@ -239,7 +239,8 @@ export async function sendWebhooks(userId: string, rows: GradeRow[], testWebhook
   return results;
 }
 
-export async function linkAndSync(userId: string, username: string, password: string) {
+/** Links the account and returns the just-fetched rows for the first Ritual delivery. */
+export async function linkAndSyncWithRows(userId: string, username: string, password: string) {
   const rows = await fetchGrades(username, password); // throws GucError on bad login
   const db = await admin();
   const { error } = await db.from("guc_accounts").upsert({
@@ -251,7 +252,14 @@ export async function linkAndSync(userId: string, username: string, password: st
     updated_at: new Date().toISOString(),
   });
   if (error) throw new Error(error.message);
-  return applyGrades(userId, rows, false);
+  const result = await applyGrades(userId, rows, false);
+  return { ...result, rows };
+}
+
+/** Existing callers keep receiving only the summary; grade rows stay server-side. */
+export async function linkAndSync(userId: string, username: string, password: string) {
+  const { rows: _rows, ...result } = await linkAndSyncWithRows(userId, username, password);
+  return result;
 }
 
 export async function syncAccount(userId: string) {
