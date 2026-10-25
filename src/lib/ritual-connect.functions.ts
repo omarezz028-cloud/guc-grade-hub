@@ -132,7 +132,7 @@ export const connectToRitual = createServerFn({ method: "POST" })
         : [causeCode, causeMessage || rawMessage]
             .filter(Boolean)
             .join(": ")
-            .replace(/https?:\\/\\/[^\\s]+/gi, "[endpoint]")
+            .replace(/https?:\/\/[^\s]+/gi, "[endpoint]")
             .split(secret).join("[redacted]")
             .split(data.state).join("[redacted]")
             .slice(0, 120) || "unknown network error";
