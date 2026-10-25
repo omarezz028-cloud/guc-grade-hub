@@ -114,7 +114,7 @@ export const connectToRitual = createServerFn({ method: "POST" })
 
     if (response.status !== 200) {
       const detail = await responseError(response, secret, data.state);
-      await restoreConnection(db, userId, previousConnection);
+      await restoreConnection();
       return {
         ok: false as const,
         error: "Ritual returned HTTP " + response.status + ": " + detail,
