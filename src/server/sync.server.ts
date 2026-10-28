@@ -137,6 +137,8 @@ export async function sendRitualGrades(userId: string, rows: GradeRow[]): Promis
   if (!connection?.enabled || !connection.secret_cipher) return summary;
 
   const secret = await decryptText(connection.secret_cipher);
+  type Claimed = { course: string; item: string; grade: string; token: string };
+  const claimedRows: Claimed[] = [];
   for (const row of rows) {
     const grade = ritualGradeValue(row.grade);
     if (!grade) {
@@ -144,101 +146,113 @@ export async function sendRitualGrades(userId: string, rows: GradeRow[]): Promis
       continue;
     }
     summary.eligible++;
-    const leaseToken = crypto.randomUUID();
+    const token = crypto.randomUUID();
     const { data: claimed, error: claimError } = await db.rpc("claim_ritual_grade", {
       p_connection_id: connection.id,
       p_course: row.course,
       p_item: row.item,
       p_grade: grade,
-      p_token: leaseToken,
+      p_token: token,
     });
     if (claimError) throw new Error(claimError.message);
     if (!claimed) {
       summary.skipped++;
       continue;
     }
+    claimedRows.push({ course: row.course, item: row.item, grade, token });
+  }
+  if (!claimedRows.length) return summary;
 
+  const releaseAll = async () => {
+    for (const c of claimedRows) {
+      await db
+        .from("ritual_grade_deliveries")
+        .update({ lease_token: null, leased_until: null })
+        .eq("connection_id", connection.id)
+        .eq("course", c.course)
+        .eq("item", c.item)
+        .eq("lease_token", c.token);
+    }
+  };
+
+  // One request carrying every new/changed grade (Ritual accepts a `grades` array), retried once.
+  const body = JSON.stringify({
+    grades: claimedRows.map(({ course, item, grade }) => ({ course, item, grade })),
+  });
+  let response: Response | null = null;
+  let lastError = "";
+  for (let attempt = 0; attempt < 2 && !response; attempt++) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
-    let response: Response;
+    const timer = setTimeout(() => controller.abort(), 20_000);
     try {
       response = await fetch("https://habit-buddy-app-47.lovable.app/api/public/grades", {
         method: "POST",
         redirect: "error",
         signal: controller.signal,
-        headers: {
-          Authorization: "Bearer " + secret,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ course: row.course, item: row.item, grade }),
+        headers: { Authorization: "Bearer " + secret, "Content-Type": "application/json" },
+        body,
       });
-    } catch {
-      await db
-        .from("ritual_grade_deliveries")
-        .update({ lease_token: null, leased_until: null })
-        .eq("connection_id", connection.id)
-        .eq("course", row.course)
-        .eq("item", row.item)
-        .eq("lease_token", leaseToken);
-      await db.from("ritual_connections").update({ last_status: "Delivery failed; it will retry." }).eq("id", connection.id);
-      summary.failed++;
-      continue;
+    } catch (error) {
+      lastError = controller.signal.aborted ? "timeout" : error instanceof Error ? error.message.slice(0, 120) : "network error";
     } finally {
       clearTimeout(timer);
     }
+  }
 
-    if (response.status === 401) {
-      await db
-        .from("ritual_connections")
-        .update({
-          secret_cipher: null,
-          enabled: false,
-          last_status: "Ritual disconnected. Reconnect from Ritual to resume grade delivery.",
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", connection.id);
-      summary.failed++;
-      break;
-    }
-    if (response.status !== 200) {
-      await db
-        .from("ritual_grade_deliveries")
-        .update({ lease_token: null, leased_until: null })
-        .eq("connection_id", connection.id)
-        .eq("course", row.course)
-        .eq("item", row.item)
-        .eq("lease_token", leaseToken);
-      await db.from("ritual_connections").update({ last_status: "Ritual returned HTTP " + response.status + "; it will retry." }).eq("id", connection.id);
-      summary.failed++;
-      continue;
-    }
-
-    const acknowledgment = await response.json().catch(() => null) as {
-      received?: unknown; updated?: unknown; saved_unsorted?: unknown; created_courses?: unknown;
-    } | null;
-    summary.sent++;
-    summary.accepted += typeof acknowledgment?.received === "number" ? acknowledgment.received : 1;
-    summary.updated += typeof acknowledgment?.updated === "number" ? acknowledgment.updated : 0;
-    summary.saved_unsorted += typeof acknowledgment?.saved_unsorted === "number" ? acknowledgment.saved_unsorted : 0;
-    if (Array.isArray(acknowledgment?.created_courses)) {
-      for (const course of acknowledgment.created_courses) {
-        if (typeof course === "string" && !summary.created_courses.includes(course)) summary.created_courses.push(course);
-      }
-    }
-    const now = new Date().toISOString();
-    const { error: deliveryError } = await db
-      .from("ritual_grade_deliveries")
-      .update({ sent_grade: grade, sent_at: now, lease_token: null, leased_until: null })
-      .eq("connection_id", connection.id)
-      .eq("course", row.course)
-      .eq("item", row.item)
-      .eq("lease_token", leaseToken);
-    if (deliveryError) throw new Error(deliveryError.message);
+  if (!response) {
+    await releaseAll();
+    await db.from("ritual_connections").update({ last_status: "Delivery failed (" + lastError + "); it will retry." }).eq("id", connection.id);
+    summary.failed += claimedRows.length;
+    return summary;
+  }
+  if (response.status === 401) {
+    await releaseAll();
     await db
       .from("ritual_connections")
-      .update({ last_status: "Grade sent successfully.", last_sent_at: now })
+      .update({
+        secret_cipher: null,
+        enabled: false,
+        last_status: "Ritual disconnected. Reconnect from Ritual to resume grade delivery.",
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", connection.id);
+    summary.failed += claimedRows.length;
+    return summary;
   }
+  if (response.status !== 200) {
+    await releaseAll();
+    await db.from("ritual_connections").update({ last_status: "Ritual returned HTTP " + response.status + "; it will retry." }).eq("id", connection.id);
+    summary.failed += claimedRows.length;
+    return summary;
+  }
+
+  const ack = (await response.json().catch(() => null)) as {
+    received?: unknown; updated?: unknown; saved_unsorted?: unknown; created_courses?: unknown;
+  } | null;
+  summary.sent = claimedRows.length;
+  summary.accepted = typeof ack?.received === "number" ? ack.received : claimedRows.length;
+  summary.updated = typeof ack?.updated === "number" ? ack.updated : 0;
+  summary.saved_unsorted = typeof ack?.saved_unsorted === "number" ? ack.saved_unsorted : 0;
+  if (Array.isArray(ack?.created_courses)) {
+    for (const course of ack.created_courses) {
+      if (typeof course === "string" && !summary.created_courses.includes(course)) summary.created_courses.push(course);
+    }
+  }
+  const now = new Date().toISOString();
+  for (const c of claimedRows) {
+    const { error: deliveryError } = await db
+      .from("ritual_grade_deliveries")
+      .update({ sent_grade: c.grade, sent_at: now, lease_token: null, leased_until: null })
+      .eq("connection_id", connection.id)
+      .eq("course", c.course)
+      .eq("item", c.item)
+      .eq("lease_token", c.token);
+    if (deliveryError) throw new Error(deliveryError.message);
+  }
+  await db
+    .from("ritual_connections")
+    .update({ last_status: "Grades sent successfully.", last_sent_at: now })
+    .eq("id", connection.id);
   return summary;
 }
 
