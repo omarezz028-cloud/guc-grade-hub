@@ -47,13 +47,14 @@ async function applyGrades(userId: string, rows: GradeRow[], notify: boolean) {
     const { error } = await db.from("grades").upsert(upserts, { onConflict: "user_id,course,item" });
     if (error) throw new Error(error.message);
   }
+  let ritualDelivery: RitualDeliverySummary | null = null;
   if (notify) {
     await sendWebhooks(userId, rows);
-    await sendRitualGrades(userId, rows);
+    ritualDelivery = await sendRitualGrades(userId, rows);
   } else {
     await baselineWebhooks(userId, rows);
   }
-  return { total: rows.length, changed: changes.length };
+  return { total: rows.length, changed: changes.length, ritualDelivery };
 }
 
 const sign = (body: string, secret: string) => createHmac("sha256", secret).update(body).digest("hex");
@@ -110,7 +111,22 @@ export async function baselineRitualGrades(userId: string) {
   }
 }
 
-export async function sendRitualGrades(userId: string, rows: GradeRow[]) {
+export type RitualDeliverySummary = {
+  eligible: number;
+  sent: number;
+  accepted: number;
+  updated: number;
+  saved_unsorted: number;
+  failed: number;
+  skipped: number;
+  created_courses: string[];
+};
+
+export async function sendRitualGrades(userId: string, rows: GradeRow[]): Promise<RitualDeliverySummary> {
+  const summary: RitualDeliverySummary = {
+    eligible: 0, sent: 0, accepted: 0, updated: 0, saved_unsorted: 0,
+    failed: 0, skipped: 0, created_courses: [],
+  };
   const db = await admin();
   const { data: connection, error: connectionError } = await db
     .from("ritual_connections")
@@ -118,12 +134,16 @@ export async function sendRitualGrades(userId: string, rows: GradeRow[]) {
     .eq("user_id", userId)
     .maybeSingle();
   if (connectionError) throw new Error(connectionError.message);
-  if (!connection?.enabled || !connection.secret_cipher) return;
+  if (!connection?.enabled || !connection.secret_cipher) return summary;
 
   const secret = await decryptText(connection.secret_cipher);
   for (const row of rows) {
     const grade = ritualGradeValue(row.grade);
-    if (!grade) continue;
+    if (!grade) {
+      summary.skipped++;
+      continue;
+    }
+    summary.eligible++;
     const leaseToken = crypto.randomUUID();
     const { data: claimed, error: claimError } = await db.rpc("claim_ritual_grade", {
       p_connection_id: connection.id,
@@ -133,7 +153,10 @@ export async function sendRitualGrades(userId: string, rows: GradeRow[]) {
       p_token: leaseToken,
     });
     if (claimError) throw new Error(claimError.message);
-    if (!claimed) continue;
+    if (!claimed) {
+      summary.skipped++;
+      continue;
+    }
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10_000);
@@ -158,6 +181,7 @@ export async function sendRitualGrades(userId: string, rows: GradeRow[]) {
         .eq("item", row.item)
         .eq("lease_token", leaseToken);
       await db.from("ritual_connections").update({ last_status: "Delivery failed; it will retry." }).eq("id", connection.id);
+      summary.failed++;
       continue;
     } finally {
       clearTimeout(timer);
@@ -173,6 +197,7 @@ export async function sendRitualGrades(userId: string, rows: GradeRow[]) {
           updated_at: new Date().toISOString(),
         })
         .eq("id", connection.id);
+      summary.failed++;
       break;
     }
     if (response.status !== 200) {
@@ -184,9 +209,22 @@ export async function sendRitualGrades(userId: string, rows: GradeRow[]) {
         .eq("item", row.item)
         .eq("lease_token", leaseToken);
       await db.from("ritual_connections").update({ last_status: "Ritual returned HTTP " + response.status + "; it will retry." }).eq("id", connection.id);
+      summary.failed++;
       continue;
     }
 
+    const acknowledgment = await response.json().catch(() => null) as {
+      received?: unknown; updated?: unknown; saved_unsorted?: unknown; created_courses?: unknown;
+    } | null;
+    summary.sent++;
+    summary.accepted += typeof acknowledgment?.received === "number" ? acknowledgment.received : 1;
+    summary.updated += typeof acknowledgment?.updated === "number" ? acknowledgment.updated : 0;
+    summary.saved_unsorted += typeof acknowledgment?.saved_unsorted === "number" ? acknowledgment.saved_unsorted : 0;
+    if (Array.isArray(acknowledgment?.created_courses)) {
+      for (const course of acknowledgment.created_courses) {
+        if (typeof course === "string" && !summary.created_courses.includes(course)) summary.created_courses.push(course);
+      }
+    }
     const now = new Date().toISOString();
     const { error: deliveryError } = await db
       .from("ritual_grade_deliveries")
@@ -201,6 +239,7 @@ export async function sendRitualGrades(userId: string, rows: GradeRow[]) {
       .update({ last_status: "Grade sent successfully.", last_sent_at: now })
       .eq("id", connection.id);
   }
+  return summary;
 }
 
 export async function sendWebhooks(userId: string, rows: GradeRow[], testWebhookId?: string) {

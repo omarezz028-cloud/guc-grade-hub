@@ -62,7 +62,7 @@ export const Route = createFileRoute("/api/public/sync-now")({
           const { syncAccount } = await import("@/server/sync.server");
           const result = await syncAccount(userId);
           return Response.json(
-            { ok: true, total: result.total, changed: result.changed },
+            { ok: true, total: result.total, changed: result.changed, delivery: result.ritualDelivery },
             { headers: { "Cache-Control": "no-store" } },
           );
         } catch {
