@@ -12,7 +12,9 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as AuthenticatedRouteRouteImport } from './routes/_authenticated/route'
 import { Route as AuthRouteImport } from './routes/auth'
+import { Route as ConnectRouteImport } from './routes/connect'
 import { Route as AuthenticatedDashboardRouteImport } from './routes/_authenticated/dashboard'
+import { Route as ApiPublicSyncNowRouteImport } from './routes/api/public/sync-now'
 import { Route as ApiPublicJobsSyncAllRouteImport } from './routes/api/public/jobs/sync-all'
 import { Route as ApiPublicV1GradesRouteImport } from './routes/api/public/v1/grades'
 
@@ -30,10 +32,20 @@ const AuthRoute = AuthRouteImport.update({
   path: '/auth',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ConnectRoute = ConnectRouteImport.update({
+  id: '/connect',
+  path: '/connect',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthenticatedDashboardRoute = AuthenticatedDashboardRouteImport.update({
   id: '/dashboard',
   path: '/dashboard',
   getParentRoute: () => AuthenticatedRouteRoute,
+} as any)
+const ApiPublicSyncNowRoute = ApiPublicSyncNowRouteImport.update({
+  id: '/api/public/sync-now',
+  path: '/api/public/sync-now',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiPublicJobsSyncAllRoute = ApiPublicJobsSyncAllRouteImport.update({
   id: '/api/public/jobs/sync-all',
@@ -49,14 +61,18 @@ const ApiPublicV1GradesRoute = ApiPublicV1GradesRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/connect': typeof ConnectRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/public/sync-now': typeof ApiPublicSyncNowRoute
   '/api/public/jobs/sync-all': typeof ApiPublicJobsSyncAllRoute
   '/api/public/v1/grades': typeof ApiPublicV1GradesRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/auth': typeof AuthRoute
+  '/connect': typeof ConnectRoute
   '/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/public/sync-now': typeof ApiPublicSyncNowRoute
   '/api/public/jobs/sync-all': typeof ApiPublicJobsSyncAllRoute
   '/api/public/v1/grades': typeof ApiPublicV1GradesRoute
 }
@@ -65,7 +81,9 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/_authenticated': typeof AuthenticatedRouteRouteWithChildren
   '/auth': typeof AuthRoute
+  '/connect': typeof ConnectRoute
   '/_authenticated/dashboard': typeof AuthenticatedDashboardRoute
+  '/api/public/sync-now': typeof ApiPublicSyncNowRoute
   '/api/public/jobs/sync-all': typeof ApiPublicJobsSyncAllRoute
   '/api/public/v1/grades': typeof ApiPublicV1GradesRoute
 }
@@ -74,14 +92,18 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/auth'
+    | '/connect'
     | '/dashboard'
+    | '/api/public/sync-now'
     | '/api/public/jobs/sync-all'
     | '/api/public/v1/grades'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/auth'
+    | '/connect'
     | '/dashboard'
+    | '/api/public/sync-now'
     | '/api/public/jobs/sync-all'
     | '/api/public/v1/grades'
   id:
@@ -89,7 +111,9 @@ export interface FileRouteTypes {
     | '/'
     | '/_authenticated'
     | '/auth'
+    | '/connect'
     | '/_authenticated/dashboard'
+    | '/api/public/sync-now'
     | '/api/public/jobs/sync-all'
     | '/api/public/v1/grades'
   fileRoutesById: FileRoutesById
@@ -98,6 +122,8 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AuthenticatedRouteRoute: typeof AuthenticatedRouteRouteWithChildren
   AuthRoute: typeof AuthRoute
+  ConnectRoute: typeof ConnectRoute
+  ApiPublicSyncNowRoute: typeof ApiPublicSyncNowRoute
   ApiPublicJobsSyncAllRoute: typeof ApiPublicJobsSyncAllRoute
   ApiPublicV1GradesRoute: typeof ApiPublicV1GradesRoute
 }
@@ -125,12 +151,26 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AuthRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/connect': {
+      id: '/connect'
+      path: '/connect'
+      fullPath: '/connect'
+      preLoaderRoute: typeof ConnectRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/_authenticated/dashboard': {
       id: '/_authenticated/dashboard'
       path: '/dashboard'
       fullPath: '/dashboard'
       preLoaderRoute: typeof AuthenticatedDashboardRouteImport
       parentRoute: typeof AuthenticatedRouteRoute
+    }
+    '/api/public/sync-now': {
+      id: '/api/public/sync-now'
+      path: '/api/public/sync-now'
+      fullPath: '/api/public/sync-now'
+      preLoaderRoute: typeof ApiPublicSyncNowRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/public/jobs/sync-all': {
       id: '/api/public/jobs/sync-all'
@@ -164,6 +204,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AuthenticatedRouteRoute: AuthenticatedRouteRouteWithChildren,
   AuthRoute: AuthRoute,
+  ConnectRoute: ConnectRoute,
+  ApiPublicSyncNowRoute: ApiPublicSyncNowRoute,
   ApiPublicJobsSyncAllRoute: ApiPublicJobsSyncAllRoute,
   ApiPublicV1GradesRoute: ApiPublicV1GradesRoute,
 }
