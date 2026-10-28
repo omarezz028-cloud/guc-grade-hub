@@ -9,8 +9,8 @@ import { connectToRitual } from "@/lib/ritual-connect.functions";
 
 export const Route = createFileRoute("/connect")({
   validateSearch: (search: Record<string, unknown>) => ({
-    state: typeof search.state === "string" ? search.state : "",
-    return: typeof search.return === "string" ? search.return : "",
+    state: typeof search["state"] === "string" ? search["state"] : "",
+    return: typeof search["return"] === "string" ? search["return"] : "",
   }),
   head: () => ({
     meta: [

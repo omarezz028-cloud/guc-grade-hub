@@ -251,16 +251,6 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      claim_ritual_grade: {
-        Args: {
-          p_connection_id: string
-          p_course: string
-          p_grade: string
-          p_item: string
-          p_token: string
-        }
-        Returns: boolean
-      }
       claim_grade_notification: {
         Args: {
           p_course: string
@@ -268,6 +258,16 @@ export type Database = {
           p_item: string
           p_token: string
           p_webhook_id: string
+        }
+        Returns: boolean
+      }
+      claim_ritual_grade: {
+        Args: {
+          p_connection_id: string
+          p_course: string
+          p_grade: string
+          p_item: string
+          p_token: string
         }
         Returns: boolean
       }

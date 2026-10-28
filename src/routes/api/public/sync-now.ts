@@ -61,8 +61,13 @@ export const Route = createFileRoute("/api/public/sync-now")({
         try {
           const { syncAccount } = await import("@/server/sync.server");
           const result = await syncAccount(userId);
+          const { data: grades } = await supabaseAdmin
+            .from("grades")
+            .select("course,item,grade,updated_at")
+            .eq("user_id", userId)
+            .order("course");
           return Response.json(
-            { ok: true, total: result.total, changed: result.changed, delivery: result.ritualDelivery },
+            { ok: true, total: result.total, changed: result.changed, delivery: result.ritualDelivery, grades: grades ?? [] },
             { headers: { "Cache-Control": "no-store" } },
           );
         } catch {

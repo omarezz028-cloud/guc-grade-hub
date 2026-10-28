@@ -160,7 +160,7 @@ export const connectToRitual = createServerFn({ method: "POST" })
         target.pathname === original.pathname &&
         target.search === "" &&
         target.hash === "";
-      if (!safeRedirect || (response.status !== 307 && response.status !== 308)) {
+      if (!target || !safeRedirect || (response.status !== 307 && response.status !== 308)) {
         await restoreConnection();
         return {
           ok: false as const,
