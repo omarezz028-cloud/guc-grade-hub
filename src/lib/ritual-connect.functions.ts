@@ -195,6 +195,11 @@ export const connectToRitual = createServerFn({ method: "POST" })
     }
 
     try {
+      const { error: clearDeliveryError } = await db
+        .from("ritual_grade_deliveries")
+        .delete()
+        .eq("connection_id", connectionValues.id);
+      if (clearDeliveryError) throw new Error("Could not prepare the initial grade delivery.");
       await sendRitualGrades(userId, initialRows);
     } catch {
       // The handshake succeeded; scheduled sync will retry this delivery if it failed.
