@@ -16,6 +16,10 @@ export const Route = createFileRoute("/connect")({
     meta: [
       { title: "Connect to Ritual — GradeWatch" },
       { name: "description", content: "Securely connect GUC grades to Ritual." },
+      { property: "og:title", content: "Connect to Ritual — GradeWatch" },
+      { property: "og:description", content: "Securely connect GUC grades to Ritual." },
+      { property: "og:type", content: "website" },
+      { name: "twitter:card", content: "summary_large_image" },
       { name: "robots", content: "noindex, nofollow" },
       { name: "referrer", content: "no-referrer" },
     ],

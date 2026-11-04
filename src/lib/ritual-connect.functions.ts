@@ -172,7 +172,7 @@ export const connectToRitual = createServerFn({ method: "POST" })
       try {
         response = await fetch(target.toString(), {
           method: "POST",
-          redirect: "error",
+          redirect: "manual",
           signal: redirectedController.signal,
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ connect: true, state: data.state, secret }),

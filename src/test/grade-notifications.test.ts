@@ -106,12 +106,21 @@ describe("Outgoing grade notifications", () => {
   });
 
   it("does not duplicate sends during overlapping checks", async () => {
+    let release: () => void = () => {};
+    let started: () => void = () => {};
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const entered = new Promise<void>(resolve => { started = resolve; });
     vi.stubGlobal("fetch", vi.fn(async (_url, options: RequestInit) => {
       state.calls.push(String(options.body));
-      await new Promise(resolve => setTimeout(resolve, 20));
+      started();
+      await pending;
       return new Response(null, { status: 200 });
     }));
-    await Promise.all([sendWebhooks("user", [row]), sendWebhooks("user", [row])]);
+    const first = sendWebhooks("user", [row]);
+    await entered;
+    await sendWebhooks("user", [row]);
+    release();
+    await first;
     expect(state.calls).toHaveLength(1);
   });
 

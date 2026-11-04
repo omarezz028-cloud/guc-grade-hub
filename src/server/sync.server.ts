@@ -187,7 +187,7 @@ export async function sendRitualGrades(userId: string, rows: GradeRow[]): Promis
     try {
       response = await fetch("https://habit-buddy-app-47.lovable.app/api/public/grades", {
         method: "POST",
-        redirect: "error",
+        redirect: "manual",
         signal: controller.signal,
         headers: { Authorization: "Bearer " + secret, "Content-Type": "application/json" },
         body,
