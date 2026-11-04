@@ -129,7 +129,7 @@ async function ntlmGet(path: string, rawUser: string, password: string): Promise
     }
     const auth = (r1.headers["www-authenticate"] ?? []).join(", ");
     const challenge = /NTLM\s+([A-Za-z0-9+/=]{20,})/.exec(auth);
-    if (!challenge) {
+    if (!challenge?.[1]) {
       throw new GucError(
         "GUC portal did not start a login handshake (status " + r1.status + ").",
         "unexpected",
@@ -137,7 +137,7 @@ async function ntlmGet(path: string, rawUser: string, password: string): Promise
     }
     const cookie1 = mergeCookies(r1.headers["set-cookie"] ?? []);
     const r2 = await conn.request("GET", path, {
-      Authorization: "NTLM " + ntlmType3(challenge[1]!, user, password, domain),
+      Authorization: "NTLM " + ntlmType3(challenge[1], user, password, domain),
       ...(cookie1 ? { Cookie: cookie1 } : {}),
     });
     if (r2.status === 401) {
@@ -249,6 +249,30 @@ export function parseGrades(html: string, courseOverride?: string): GradeRow[] {
       .find((match) => /\bselected(?:\s|=|>)/i.test(match[1] ?? ""))?.[2] ?? "",
   );
 
+  // GUC lists midterms separately from the selected course's coursework.
+  // Match their course codes to dropdown labels so both share one course.
+  const courseOptions = [...html.matchAll(/<option\b[^>]*>([\s\S]*?)<\/option>/gi)]
+    .map((option) => decode(option[1] ?? ""));
+  const midtermTables = tables.filter((table) => /\bid\s*=\s*["'][^"']*midDg["']/i.test(table.split(">")[0] ?? ""));
+  for (const table of midtermTables) {
+    const tableRows = [...table.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)].map((row) =>
+      [...row[0].matchAll(/<(td|th)\b[\s\S]*?<\/\1>/gi)].map((cell) => decode(cell[0])),
+    );
+    const header = tableRows.find((cells) => cells.map(normalize).includes("percentage"));
+    if (!header) continue;
+    const courseColumn = header.map(normalize).indexOf("course");
+    const percentColumn = header.map(normalize).indexOf("percentage");
+    if (courseColumn < 0 || percentColumn < 0) continue;
+    for (const cells of tableRows) {
+      const portalCourse = cells[courseColumn] ?? "";
+      const percentage = cells[percentColumn]?.replace(/\s*%$/, "").trim() ?? "";
+      if (!portalCourse || !/^\d+(?:\.\d+)?$/.test(percentage)) continue;
+      const code = portalCourse.match(/\b[A-Z]{2,}\d{3,}\b/i)?.[0];
+      const course = courseOptions.find((label) => code && label.split(/\s+/).some((word) => word.toLowerCase() === code.toLowerCase())) ?? portalCourse;
+      rows.push({ course, item: "Midterm", grade: percentage + " / 100" });
+    }
+  }
+
   // ASP.NET can nest layout tables around its GridView. Parse the grade rows
   // from the document as a fallback so the nested table boundary cannot hide them.
   const documentRows = [...html.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)].map((match) => ({
@@ -260,7 +284,7 @@ export function parseGrades(html: string, courseOverride?: string): GradeRow[] {
     return labels.includes("quiz assignment") && labels.includes("element name") && labels.includes("grade");
   });
   if (quizHeaderIndex >= 0) {
-    const header = documentRows[quizHeaderIndex]!.cells.map(normalize);
+    const header = (documentRows[quizHeaderIndex]?.cells ?? []).map(normalize);
     const quizColumn = header.indexOf("quiz assignment");
     const elementColumn = header.indexOf("element name");
     const gradeColumn = header.indexOf("grade");
@@ -281,6 +305,7 @@ export function parseGrades(html: string, courseOverride?: string): GradeRow[] {
   }
 
   for (const table of chosen) {
+    if (midtermTables.includes(table)) continue;
     const parsed = [...table.matchAll(/<tr\b[\s\S]*?<\/tr>/gi)].map((match) => ({
       html: match[0],
       cells: [...match[0].matchAll(/<(td|th)\b[\s\S]*?<\/\1>/gi)].map((cell) => decode(cell[0])),
@@ -290,7 +315,7 @@ export function parseGrades(html: string, courseOverride?: string): GradeRow[] {
       const headerLike = /<th\b/i.test(rowHtml) || labels.some((label) => knownLabels.has(label));
       return headerLike && labels.filter(Boolean).every((label) => knownLabels.has(label));
     });
-    const header = headerIndex >= 0 ? parsed[headerIndex]!.cells.map(normalize) : [];
+    const header = headerIndex >= 0 ? (parsed[headerIndex]?.cells ?? []).map(normalize) : [];
     const courseColumn = header.findIndex((label) => courseLabels.has(label));
     const itemColumn = header.findIndex((label) => itemLabels.has(label));
     const gradeColumn = header.findIndex((label) => gradeLabels.has(label));
@@ -300,7 +325,7 @@ export function parseGrades(html: string, courseOverride?: string): GradeRow[] {
 
     for (let rowIndex = 0; rowIndex < parsed.length; rowIndex++) {
       if (rowIndex === headerIndex) continue;
-      const cells = parsed[rowIndex]!.cells;
+      const cells = parsed[rowIndex]?.cells ?? [];
       if (cells.length < 2) continue;
       const normalizedCells = cells.map(normalize);
       if (

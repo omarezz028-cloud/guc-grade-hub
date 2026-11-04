@@ -16,3 +16,5 @@
 - External apps use `/api/public/v1/grades` with hashed `guc_` API keys; single-grade webhooks use server-only Ritual bearer authorization and retain HMAC-SHA256 signing.
 - Per-webhook grade delivery history and atomic leases prevent overlapping checks from repeating successful sends; failed deliveries retry on the next sync, and test sends never alter grade history. Existing grades are baselined when an address is added so historical grades are not replayed.
 - Background checks run via the managed HTTP schedule calling `/api/public/jobs/sync-all`.
+- Parse the portal's midterm percentage table alongside coursework, matching dropdown course codes and converting percentages to scores out of 100 so Ritual receives consistent grade records.
+- Outgoing Ritual requests use manual redirects and accept only direct successful responses because the published runtime does not support the error redirect mode.
