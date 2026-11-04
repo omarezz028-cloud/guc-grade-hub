@@ -26,7 +26,6 @@ describe("GUC midterm collection", () => {
     ]);
   });
   it("does not invent a score for an unpublished midterm", () => {
-    expect(parseGrades(fixture.replace('93.3333', '&nbsp;'), course)).some;
     expect(parseGrades(fixture.replace('93.3333', '&nbsp;'), course).filter(row => row.item === "Midterm")).toEqual([]);
   });
 });
